@@ -1,101 +1,128 @@
-import requests
-import subprocess
+import asyncio
 import sys
+import httpx
+import time
+from datetime import datetime
+
+BLUE = "\033[34m"
+MAGENTA = "\033[35m"
+CYAN = "\033[36m"
+RESET = "\033[0m"  # called to return to standard terminal text color
+
+BRIGHT_RED = "\033[91m"
+BRIGHT_GREEN = "\033[92m"
+BRIGHT_YELLOW = "\033[93m"
+BRIGHT_BLUE = "\033[94m"
+BRIGHT_MAGENTA = "\033[95m"
+BRIGHT_CYAN = "\033[96m"
+WHITE = "\033[97m"
 
 
+# get the repository url
 def get_repository_url():
-    """Take the repository URL as command line argument"""
     repo_url = sys.argv[1:]
-    repo_info = repo_url[0].split("/")
-    return repo_info
+    return repo_url[0]
 
 
-def get_repository_content():
-    """Fetch the repository contents and metadata"""
-    repo = get_repository_url()
-    repo_owner = repo[3]
-    repo_name = repo[4]
+def check_api_request_limit():
+    response = httpx.get("https://api.github.com/rate_limit").json()
+    rate_remaining = response["rate"]["remaining"]
+    rate_used = response["rate"]["used"]
+    reset_time = datetime.fromtimestamp(response["rate"]["reset"])
+    used_all = False
+    if rate_remaining == 0 or rate_used == 60:
+        used_all = True
+    return {
+        "rate_remaining": rate_remaining,
+        "rate_used": rate_used,
+        "used_all": used_all,
+        "reset_time": str(reset_time),
+    }
+
+
+def get_request_url(owner: str, username: str, path: str, dir: str) -> str:
+    if dir:
+        return f"https://api.github.com/repos/{owner}/{username}/contents/{path}/{dir}?ref=main"
+    return f"https://api.github.com/repos/{owner}/{username}/contents/{path}"
+
+
+# make requests
+def get_repository_content(url: str):
+    print("\nFetching repository contents...\n")
+    repo_slugs = url.split("/")
+    repo_owner = repo_slugs[3]
+    repo_name = repo_slugs[4]
+    repo_branch = repo_slugs[5:7]
     path = ""
-    if len(repo) > 5:
-        raw_path = "/".join(repo[4:])
-        path = "/" + raw_path + "/"
 
-    repo_content_raw = requests.get(
-        f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}"
-    )
-    repo_content_json = repo_content_raw.json()
-    return repo_content_json
+    if len(repo_slugs) > 5:
+        path = "/".join(repo_slugs[7:])
 
+    print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
+    print(BRIGHT_YELLOW + repo_name + RESET)
 
-def choose_file(file_list, prompt):
-    """Display list of files in fzf viewer."""
-    if not file_list:
-        return None
+    print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
+    print(BRIGHT_YELLOW + repo_owner + RESET)
 
-    try:
-        result = subprocess.run(
-            [
-                "fzf",
-                "--prompt",
-                prompt,
-                "--height",
-                "~50%",
-                "--layout",
-                "reverse",
-                "--border",
-                "--exit-0",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            input=file_list,
-        )
-    except ChildProcessError:
-        print("No file selected, Aborting!")
-        return None
+    print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
+    print(BRIGHT_YELLOW + repo_branch[1] + RESET)
 
-    return result
+    print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
+    print(BRIGHT_YELLOW + path + RESET)
 
-
-def fetch_files(repo_content):
-    """
-    Get files and its contents
-
-    repo_content: list
-    """
-    if not repo_content:
-        return None
-
+    requests = [
+        f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}",
+    ]
+    response = []
     files = []
-    dirs = []
 
-    for content in repo_content:
-        if content["type"] == "file":
-            files.append(content["name"])
-        else:
-            dirs.append(content["name"])
-        # files.append(content["name"])
-        # file_types.append((content["name"], content["type"]))
+    for i, req in enumerate(requests):
+        print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
+        print(BRIGHT_YELLOW + req + RESET)
 
-    print(files)
-    print(dirs)
+        response.append(httpx.get(req).json())
 
+        if response:
+            for res in response:
+                for content in res:
+                    # fetch files and directories
+                    if content["type"] == "file":
+                        files.append(content["name"])
+                    else:
+                        requests.append(content["url"])
+        response.clear()
 
-def download_file(file_name, repo_content):
-    if not file_name:
-        return None
-
-    file = file_name.split("\n")
-    for item in repo_content:
-        if item["name"] == file[0]:
-            print("found")
-        else:
-            print("not found")
+    print(f"Files found: {files}")
 
 
 def main():
-    content = get_repository_content()
-    fetch_files(content)
+    api_status = check_api_request_limit()
+    if api_status["used_all"]:
+        print(BRIGHT_RED + "Github API rate limit reached!" + RESET)
+        print(BRIGHT_RED + "Try again in: " + RESET, end="")
+        print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
+        return
+
+    start_time = time.perf_counter()
+
+    repo = get_repository_url()
+    get_repository_content(repo)
+
+    finish_time = time.perf_counter()
+
+    total_time = finish_time - start_time
+    print(
+        f"\nTotal execution time: {total_time:.2f} seconds. ",
+    )
+
+    api_status = check_api_request_limit()
+    if not api_status["used_all"]:
+        print(
+            f"\n{BRIGHT_YELLOW}[!]{RESET} Github API Remaining Rates: {BRIGHT_YELLOW}{api_status['rate_remaining']}{RESET}"
+        )
+        print(
+            f"{BRIGHT_YELLOW}[!]{RESET} Github API Used Rates: {BRIGHT_YELLOW}{api_status['rate_used']}{RESET}"
+        )
 
 
 if __name__ == "__main__":
