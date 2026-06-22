@@ -1,8 +1,11 @@
 import asyncio
+import subprocess
 import sys
-import httpx
 import time
 from datetime import datetime
+from pathlib import Path
+
+import requests
 
 BLUE = "\033[34m"
 MAGENTA = "\033[35m"
@@ -17,15 +20,16 @@ BRIGHT_MAGENTA = "\033[95m"
 BRIGHT_CYAN = "\033[96m"
 WHITE = "\033[97m"
 
+DOWNLOAD_DIR = Path("filehub_downloads")
 
-# get the repository url
+
 def get_repository_url():
     repo_url = sys.argv[1:]
     return repo_url[0]
 
 
 def check_api_request_limit():
-    response = httpx.get("https://api.github.com/rate_limit").json()
+    response = requests.get("https://api.github.com/rate_limit").json()
     rate_remaining = response["rate"]["remaining"]
     rate_used = response["rate"]["used"]
     reset_time = datetime.fromtimestamp(response["rate"]["reset"])
@@ -46,7 +50,6 @@ def get_request_url(owner: str, username: str, path: str, dir: str) -> str:
     return f"https://api.github.com/repos/{owner}/{username}/contents/{path}"
 
 
-# make requests
 def get_repository_content(url: str):
     print("\nFetching repository contents...\n")
     repo_slugs = url.split("/")
@@ -70,29 +73,87 @@ def get_repository_content(url: str):
     print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
     print(BRIGHT_YELLOW + path + RESET)
 
-    requests = [
+    repo_urls = [
         f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}",
     ]
     response = []
-    files = []
+    file_names = []
+    file_download_urls = []
 
-    for i, req in enumerate(requests):
+    for i, req in enumerate(repo_urls):
         print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
         print(BRIGHT_YELLOW + req + RESET)
 
-        response.append(httpx.get(req).json())
+        response.append(requests.get(req).json())
 
         if response:
             for res in response:
                 for content in res:
                     # fetch files and directories
                     if content["type"] == "file":
-                        files.append(content["name"])
+                        file_names.append(content["name"])
+                        file_download_urls.append(content["download_url"])
                     else:
-                        requests.append(content["url"])
+                        # if the content is dir then create a new requests
+                        # to fetch files inside it
+                        repo_urls.append(content["url"])
         response.clear()
 
-    print(f"Files found: {files}")
+    return {"file_names": file_names, "download_urls": file_download_urls}
+
+
+def select_files_fzf(files: dict):
+    if not files:
+        return
+    file_names = "\n".join(files["file_names"])
+    try:
+        result = subprocess.run(
+            [
+                "fzf",
+                "-m",
+                "--border-label",
+                "Select Files 📂",
+                "--height",
+                "~50%",
+                "--layout",
+                "reverse",
+                "--border",
+                "--padding",
+                "1,2",
+                "--header",
+                "TAB: mark | ENTER: confirm",
+                "--input-label",
+                "Input",
+                "--exit-0",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            input=file_names,
+        )
+    except ChildProcessError:
+        print("No file selected, Aborting!")
+        return
+
+    return result.stdout
+
+
+def download_single_file(session: requests.Session, file_name: str, file_url: dict):
+    pass
+
+
+def download_files(content: dict):
+    if not content:
+        return
+    select_files = select_files_fzf(content)
+    selected = select_files.split("\n")
+    download = []
+
+    for i, file in enumerate(content["file_names"]):
+        if selected[i] == file:
+            download.append((file, content["download_urls"]))
+
+    print(download)
 
 
 def main():
@@ -106,7 +167,8 @@ def main():
     start_time = time.perf_counter()
 
     repo = get_repository_url()
-    get_repository_content(repo)
+    repo_content = get_repository_content(repo)
+    download_files(repo_content)
 
     finish_time = time.perf_counter()
 
