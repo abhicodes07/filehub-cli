@@ -1,4 +1,5 @@
 import asyncio
+import enum
 import subprocess
 import sys
 import time
@@ -44,13 +45,7 @@ def check_api_request_limit():
     }
 
 
-def get_request_url(owner: str, username: str, path: str, dir: str) -> str:
-    if dir:
-        return f"https://api.github.com/repos/{owner}/{username}/contents/{path}/{dir}?ref=main"
-    return f"https://api.github.com/repos/{owner}/{username}/contents/{path}"
-
-
-def get_repository_content(url: str):
+def get_repository_content(url: str) -> dict:
     print("\nFetching repository contents...\n")
     repo_slugs = url.split("/")
     repo_owner = repo_slugs[3]
@@ -76,10 +71,10 @@ def get_repository_content(url: str):
     repo_urls = [
         f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}",
     ]
-    response = []
-    file_names = []
-    file_download_urls = []
 
+    response = []
+
+    files = {}
     for i, req in enumerate(repo_urls):
         print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
         print(BRIGHT_YELLOW + req + RESET)
@@ -91,21 +86,26 @@ def get_repository_content(url: str):
                 for content in res:
                     # fetch files and directories
                     if content["type"] == "file":
-                        file_names.append(content["name"])
-                        file_download_urls.append(content["download_url"])
+                        if content["name"] not in files:
+                            files[content["name"]] = {}
+                        files[content["name"]]["url"] = content["url"]
+                        files[content["name"]]["download_url"] = content["download_url"]
                     else:
                         # if the content is dir then create a new requests
                         # to fetch files inside it
                         repo_urls.append(content["url"])
         response.clear()
 
-    return {"file_names": file_names, "download_urls": file_download_urls}
+    return files
 
 
-def select_files_fzf(files: dict):
+def select_files(files: dict):
     if not files:
         return
-    file_names = "\n".join(files["file_names"])
+
+    file_names = list(files.keys())
+    input = "\n".join(file_names)
+
     try:
         result = subprocess.run(
             [
@@ -129,31 +129,38 @@ def select_files_fzf(files: dict):
             capture_output=True,
             text=True,
             check=True,
-            input=file_names,
+            input=input,
         )
     except ChildProcessError:
         print("No file selected, Aborting!")
         return
 
-    return result.stdout
+    selected_files = result.stdout.split("\n")
+    return selected_files
 
 
-def download_single_file(session: requests.Session, file_name: str, file_url: dict):
-    pass
+def download_single_file(file_name: str, file_url: dict):
+    return True
 
 
-def download_files(content: dict):
-    if not content:
-        return
-    select_files = select_files_fzf(content)
-    selected = select_files.split("\n")
-    download = []
+def download_files(files: dict):
+    selected = select_files(files)
 
-    for i, file in enumerate(content["file_names"]):
-        if selected[i] == file:
-            download.append((file, content["download_urls"]))
+    # for i, file_name in enumerate(selected):
+    #     if file_name in files:
+    #         print(list(files.keys())[i])
+    #         print(files[file_name]["download_url"])
 
-    print(download)
+    # with requests.Session() as session:
+
+    image_paths = [
+        download_single_file(list(files.keys())[i], files[file]["download_url"])
+        if file in files
+        else f"{file} Not Found"
+        for i, file in enumerate(selected)
+    ]
+
+    print(image_paths)
 
 
 def main():
@@ -167,7 +174,7 @@ def main():
     start_time = time.perf_counter()
 
     repo = get_repository_url()
-    repo_content = get_repository_content(repo)
+    repo_content = get_repository_content(repo)  # returns files
     download_files(repo_content)
 
     finish_time = time.perf_counter()
