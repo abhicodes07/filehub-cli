@@ -1,5 +1,4 @@
 import asyncio
-import enum
 import subprocess
 import sys
 import time
@@ -72,17 +71,19 @@ def get_repository_content(url: str) -> dict:
         f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}",
     ]
 
-    response = []
-
+    fetched_responses = []
     files = {}
+
     for i, req in enumerate(repo_urls):
         print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
         print(BRIGHT_YELLOW + req + RESET)
 
-        response.append(requests.get(req).json())
+        response = requests.get(req, timeout=10, allow_redirects=True)
+        response.raise_for_status()
+        fetched_responses.append(response)
 
         if response:
-            for res in response:
+            for res in fetched_responses:
                 for content in res:
                     # fetch files and directories
                     if content["type"] == "file":
@@ -94,7 +95,7 @@ def get_repository_content(url: str) -> dict:
                         # if the content is dir then create a new requests
                         # to fetch files inside it
                         repo_urls.append(content["url"])
-        response.clear()
+        fetched_responses.clear()
 
     return files
 
@@ -139,26 +140,35 @@ def select_files(files: dict):
     return selected_files
 
 
-def download_single_file(file_name: str, file_url: dict):
-    return True
+def download_single_file(session: requests.Session, file_name: str, download_url: str):
+    print(f"Downloading {BRIGHT_GREEN}{file_name}{RESET} ...")
+    ts = int(time.time())
+    url = f"{download_url}?ts={ts}"
+
+    response = session.get(url, timeout=10, allow_redirects=True)
+    response.raise_for_status()
+
+    download_path = DOWNLOAD_DIR / file_name
+
+    with download_path.open("wb") as file:
+        for chunk in response.iter_content():
+            file.write(chunk)
+    print(f"{BRIGHT_GREEN}Downloaded {file_name}{RESET} and saved to {download_path}")
+    return download_path
 
 
 def download_files(files: dict):
     selected = select_files(files)
 
-    # for i, file_name in enumerate(selected):
-    #     if file_name in files:
-    #         print(list(files.keys())[i])
-    #         print(files[file_name]["download_url"])
-
-    # with requests.Session() as session:
-
-    image_paths = [
-        download_single_file(list(files.keys())[i], files[file]["download_url"])
-        if file in files
-        else f"{file} Not Found"
-        for i, file in enumerate(selected)
-    ]
+    with requests.Session() as session:
+        image_paths = [
+            download_single_file(
+                session, list(files.keys())[i], files[file]["download_url"]
+            )
+            if file in files
+            else f"{file} Not Found"
+            for i, file in enumerate(selected)
+        ]
 
     print(image_paths)
 
