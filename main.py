@@ -41,9 +41,9 @@ def check_api_request_limit():
 def get_repository_content(url: str) -> dict:
     print("\nFetching repository contents...\n")
     repo_slugs = url.split("/")
-    repo_owner = repo_slugs[3]
     repo_name = repo_slugs[4]
-    repo_branch = repo_slugs[5:7]
+    repo_owner = repo_slugs[3]
+    repo_branch = repo_slugs[6] if len(repo_slugs) > 5 else "main"
     path = ""
 
     if len(repo_slugs) > 5:
@@ -56,7 +56,7 @@ def get_repository_content(url: str) -> dict:
     print(BRIGHT_YELLOW + repo_owner + RESET)
 
     print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
-    print(BRIGHT_YELLOW + repo_branch[1] + RESET)
+    print(BRIGHT_YELLOW + repo_branch + RESET)
 
     print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
     print(BRIGHT_YELLOW + path + RESET)
@@ -131,27 +131,37 @@ def select_files(files: dict):
         return
 
     selected_files = result.stdout.split("\n")[:-1]
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} SELECTED FILES:\n")
+    for i, selected in enumerate(selected_files, start=1):
+        print(f"\t{BRIGHT_GREEN}[{i}]{RESET} {selected}")
+    print()
+
     return selected_files
 
 
-def download_single_file(session: requests.Session, file_name: str, download_url: str):
-    print(f"{BRIGHT_GREEN}[+]{RESET} Downloading {file_name} ...")
-    ts = int(time.time())
-    url = f"{download_url}?ts={ts}"
-
-    response = session.get(url, timeout=10, allow_redirects=True)
-    response.raise_for_status()
-
+def download_single_file(
+    session: requests.Session, file_name: str, download_url: str, index: int
+):
     download_path = DOWNLOAD_DIR / file_name
 
-    with download_path.open("wb") as file:
-        for chunk in response.iter_content(chunk_size=512 * 1024):
-            if chunk:
-                file.write(chunk)
+    if download_path.exists():
+        print(f"{BRIGHT_YELLOW}{file_name}{RESET} already exists!\n")
+    else:
+        print(f"{BRIGHT_GREEN}[{index + 1}] Downloading {file_name} ...{RESET}")
+        ts = int(time.time())
+        url = f"{download_url}?ts={ts}"
 
-    print(
-        f"{BRIGHT_GREEN}[+]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
-    )
+        response = session.get(url, timeout=10, allow_redirects=True)
+        response.raise_for_status()
+        with download_path.open("wb") as file:
+            for chunk in response.iter_content(chunk_size=512 * 1024):
+                if chunk:
+                    file.write(chunk)
+
+        print(
+            f"{BRIGHT_GREEN}[{index + 1}]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
+        )
     return download_path
 
 
@@ -159,16 +169,14 @@ def download_files(files: dict):
     selected = select_files(files)
 
     with requests.Session() as session:
-        image_paths = [
-            download_single_file(
-                session, list(files.keys())[i], files[file]["download_url"]
-            )
+        file_paths = [
+            download_single_file(session, file, files[file]["download_url"], i)
             if file in files
             else f"{file} Not Found"
             for i, file in enumerate(selected)
         ]
 
-    print(image_paths)
+    return file_paths
 
 
 def main():
@@ -180,17 +188,30 @@ def main():
         return
 
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
     start_time = time.perf_counter()
 
     repo = get_repository_url()
     repo_content = get_repository_content(repo)  # returns files
-    download_files(repo_content)
+
+    file_fetching_time = time.perf_counter()
+
+    file_paths = download_files(repo_content)
 
     finish_time = time.perf_counter()
 
+    fetching_time = file_fetching_time - start_time
+    download_time = finish_time - file_fetching_time
     total_time = finish_time - start_time
+
     print(
-        f"\nTotal execution time: {total_time:.2f} seconds. ",
+        f"\nFetched {len(repo_content)} files in: {fetching_time:.2f} seconds. {(fetching_time / start_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Downloaded {len(file_paths)} files in: {download_time:.2f} seconds. {(fetching_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Total execution time: {total_time:.2f} seconds. {(total_time / total_time) * 100:.2f}% of total time.",
     )
 
     api_status = check_api_request_limit()
