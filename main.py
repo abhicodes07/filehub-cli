@@ -7,17 +7,11 @@ from pathlib import Path
 
 import requests
 
-BLUE = "\033[34m"
-MAGENTA = "\033[35m"
-CYAN = "\033[36m"
 RESET = "\033[0m"  # called to return to standard terminal text color
 
 BRIGHT_RED = "\033[91m"
 BRIGHT_GREEN = "\033[92m"
 BRIGHT_YELLOW = "\033[93m"
-BRIGHT_BLUE = "\033[94m"
-BRIGHT_MAGENTA = "\033[95m"
-BRIGHT_CYAN = "\033[96m"
 WHITE = "\033[97m"
 
 DOWNLOAD_DIR = Path("filehub_downloads")
@@ -66,24 +60,23 @@ def get_repository_content(url: str) -> dict:
 
     print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
     print(BRIGHT_YELLOW + path + RESET)
+    print()
 
     repo_urls = [
         f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}",
     ]
 
-    fetched_responses = []
+    response = []
     files = {}
 
     for i, req in enumerate(repo_urls):
         print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
         print(BRIGHT_YELLOW + req + RESET)
 
-        response = requests.get(req, timeout=10, allow_redirects=True)
-        response.raise_for_status()
-        fetched_responses.append(response)
+        response.append(requests.get(req).json())
 
         if response:
-            for res in fetched_responses:
+            for res in response:
                 for content in res:
                     # fetch files and directories
                     if content["type"] == "file":
@@ -95,7 +88,8 @@ def get_repository_content(url: str) -> dict:
                         # if the content is dir then create a new requests
                         # to fetch files inside it
                         repo_urls.append(content["url"])
-        fetched_responses.clear()
+        response.clear()
+    print()
 
     return files
 
@@ -136,12 +130,12 @@ def select_files(files: dict):
         print("No file selected, Aborting!")
         return
 
-    selected_files = result.stdout.split("\n")
+    selected_files = result.stdout.split("\n")[:-1]
     return selected_files
 
 
 def download_single_file(session: requests.Session, file_name: str, download_url: str):
-    print(f"Downloading {BRIGHT_GREEN}{file_name}{RESET} ...")
+    print(f"{BRIGHT_GREEN}[+]{RESET} Downloading {file_name} ...")
     ts = int(time.time())
     url = f"{download_url}?ts={ts}"
 
@@ -151,9 +145,13 @@ def download_single_file(session: requests.Session, file_name: str, download_url
     download_path = DOWNLOAD_DIR / file_name
 
     with download_path.open("wb") as file:
-        for chunk in response.iter_content():
-            file.write(chunk)
-    print(f"{BRIGHT_GREEN}Downloaded {file_name}{RESET} and saved to {download_path}")
+        for chunk in response.iter_content(chunk_size=512 * 1024):
+            if chunk:
+                file.write(chunk)
+
+    print(
+        f"{BRIGHT_GREEN}[+]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
+    )
     return download_path
 
 
@@ -181,6 +179,7 @@ def main():
         print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
         return
 
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     start_time = time.perf_counter()
 
     repo = get_repository_url()
