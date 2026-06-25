@@ -131,13 +131,15 @@ def select_files(files: dict):
         return
 
     selected_files = result.stdout.split("\n")[:-1]
+    selected_file_urls = {}
 
     print(f"{BRIGHT_GREEN}[+]{RESET} SELECTED FILES:\n")
     for i, selected in enumerate(selected_files, start=1):
         print(f"\t{BRIGHT_GREEN}[{i}]{RESET} {selected}")
+        selected_file_urls[selected] = files[selected]["download_url"]
     print()
 
-    return selected_files
+    return selected_file_urls
 
 
 def download_single_file(
@@ -165,15 +167,14 @@ def download_single_file(
     return download_path
 
 
-def download_files(files: dict):
-    selected = select_files(files)
+def download_files(files):
+    if not files:
+        return
 
     with requests.Session() as session:
         file_paths = [
-            download_single_file(session, file, files[file]["download_url"], i)
-            if file in files
-            else f"{file} Not Found"
-            for i, file in enumerate(selected)
+            download_single_file(session, name, url, i)
+            for i, (name, url) in enumerate(files.items())
         ]
 
     return file_paths
@@ -191,27 +192,39 @@ def main():
 
     start_time = time.perf_counter()
 
+    # fetch files from repository
     repo = get_repository_url()
-    repo_content = get_repository_content(repo)  # returns files
+    repo_content = get_repository_content(repo)
 
-    file_fetching_time = time.perf_counter()
+    file_fetch_start = time.perf_counter()
 
-    file_paths = download_files(repo_content)
+    # select files
+    selected_files = select_files(repo_content)
+
+    download_start = time.perf_counter()
+
+    # download selected files
+    file_paths = download_files(selected_files)
 
     finish_time = time.perf_counter()
 
-    fetching_time = file_fetching_time - start_time
-    download_time = finish_time - file_fetching_time
+    # calculate execution time
+    fetch_time = file_fetch_start - start_time
+    select_time = download_start - file_fetch_start
+    download_time = finish_time - download_start
     total_time = finish_time - start_time
 
     print(
-        f"\nFetched {len(repo_content)} files in: {fetching_time:.2f} seconds. {(fetching_time / start_time) * 100:.2f}% of total time.",
+        f"\nFetched {len(repo_content)} files in: {BRIGHT_RED}{fetch_time:.2f}{RESET} seconds. {(fetch_time / total_time) * 100:.2f}% of total time.",
     )
     print(
-        f"Downloaded {len(file_paths)} files in: {download_time:.2f} seconds. {(fetching_time / total_time) * 100:.2f}% of total time.",
+        f"\Selected {len(selected_files)} files in: {BRIGHT_RED}{select_time:.2f}{RESET} seconds. {(select_time / total_time) * 100:.2f}% of total time.",
     )
     print(
-        f"Total execution time: {total_time:.2f} seconds. {(total_time / total_time) * 100:.2f}% of total time.",
+        f"Downloaded {len(file_paths)} files in: {BRIGHT_RED}{download_time:.2f}{RESET} seconds. {(download_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Total execution time: {BRIGHT_RED}{total_time:.2f}{RESET} seconds. {(total_time / total_time) * 100:.2f}% of total time.",
     )
 
     api_status = check_api_request_limit()
