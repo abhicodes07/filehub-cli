@@ -124,6 +124,7 @@ def select_files(files: dict | None = None) -> dict | None:
     selected_file_urls = {}
 
     print(f"{BRIGHT_GREEN}[+]{RESET} SELECTED FILES:\n")
+
     for i, selected in enumerate(selected_files, start=1):
         print(f"\t{BRIGHT_GREEN}[{i}]{RESET} {selected}")
         selected_file_urls[selected] = files[selected]["download_url"]
@@ -158,7 +159,7 @@ async def download_single_file(
                         await f.write(chunk)
 
             print(
-                f"{BRIGHT_GREEN}[{index + 1}]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
+                f"{BRIGHT_GREEN}[*]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}"
             )
 
     return download_path
