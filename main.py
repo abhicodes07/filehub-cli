@@ -1,3 +1,4 @@
+import os
 import asyncio
 import aiofiles
 import subprocess
@@ -17,6 +18,10 @@ BRIGHT_YELLOW = "\033[93m"
 WHITE = "\033[97m"
 
 DOWNLOAD_DIR = Path("filehub_downloads")
+
+# limit download to only 4 cpus
+DOWNLOAD_LIMIT = 4
+CPU_WORKERS = os.cpu_count()
 
 
 def get_repository_url():
@@ -150,28 +155,33 @@ def select_files(files: dict):
 
 
 async def download_single_file(
-    client: httpx.AsyncClient, file_name: str, download_url: str, index: int
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    file_name: str,
+    download_url: str,
+    index: int,
 ) -> Path:
     download_path = DOWNLOAD_DIR / file_name
 
     if download_path.exists():
         print(f"{BRIGHT_YELLOW}{file_name}{RESET} already exists!\n")
     else:
-        print(f"{BRIGHT_GREEN}[{index + 1}] Downloading {file_name} ...{RESET}")
-        ts = int(time.time())
-        url = f"{download_url}?ts={ts}"
+        async with semaphore:
+            print(f"{BRIGHT_GREEN}[{index + 1}] Downloading {file_name} ...{RESET}")
+            ts = int(time.time())
+            url = f"{download_url}?ts={ts}"
 
-        response = await client.get(url, timeout=10, follow_redirects=True)
-        response.raise_for_status()
+            response = await client.get(url, timeout=10, follow_redirects=True)
+            response.raise_for_status()
 
-        async with aiofiles.open(download_path, "wb") as f:
-            async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
-                if chunk:
-                    await f.write(chunk)
+            async with aiofiles.open(download_path, "wb") as f:
+                async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
+                    if chunk:
+                        await f.write(chunk)
 
-        print(
-            f"{BRIGHT_GREEN}[{index + 1}]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
-        )
+            print(
+                f"{BRIGHT_GREEN}[{index + 1}]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
+            )
     return download_path
 
 
@@ -179,10 +189,12 @@ async def download_files(files) -> list[Path] | None:
     if not files:
         return
 
+    # NOTE: LIMIT PROCESSES SPAWN LIMIT IN CPU IN CASE THERE ARE THOURSNADS OF REQUESTS
+    dl_semaphore = asyncio.Semaphore(DOWNLOAD_LIMIT)
     async with httpx.AsyncClient() as client:
         async with asyncio.TaskGroup() as tg:
             tasks = [
-                tg.create_task(download_single_file(client, name, url, i))
+                tg.create_task(download_single_file(client, dl_semaphore, name, url, i))
                 for i, (name, url) in enumerate(files.items())
             ]
         file_paths = [task.result() for task in tasks]
