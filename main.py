@@ -24,12 +24,12 @@ DOWNLOAD_LIMIT = 4
 CPU_WORKERS = os.cpu_count()
 
 
-def get_repository_url():
+def get_repository_url() -> str:
     repo_url = sys.argv[1:]
     return repo_url[0]
 
 
-def check_api_request_limit():
+def check_api_request_limit() -> dict:
     response = requests.get("https://api.github.com/rate_limit").json()
     rate_remaining = response["rate"]["remaining"]
     rate_used = response["rate"]["used"]
@@ -45,7 +45,7 @@ def check_api_request_limit():
     }
 
 
-async def get_repository_content(owner, name, path) -> dict:
+async def get_repository_content(owner: str, name: str, path: str) -> dict:
     print("\nFetching repository contents...\n")
 
     repo_urls = [
@@ -85,10 +85,9 @@ async def get_repository_content(owner, name, path) -> dict:
     return files
 
 
-def select_files(files: dict):
+def select_files(files: dict | None = None) -> dict | None:
     if not files:
         return
-
     file_names = list(files.keys())
     input = "\n".join(file_names)
 
@@ -161,10 +160,11 @@ async def download_single_file(
             print(
                 f"{BRIGHT_GREEN}[{index + 1}]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
             )
+
     return download_path
 
 
-async def download_files(files) -> list[Path] | None:
+async def download_files(files: dict[str, str] | None = None) -> list[Path] | None:
     if not files:
         return
 
