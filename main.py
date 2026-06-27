@@ -1,7 +1,9 @@
 import asyncio
+import aiofiles
 import subprocess
 import sys
 import time
+import httpx
 from datetime import datetime
 from pathlib import Path
 
@@ -38,7 +40,7 @@ def check_api_request_limit():
     }
 
 
-def get_repository_content(url: str) -> dict:
+async def get_repository_content(url: str) -> dict:
     print("\nFetching repository contents...\n")
     repo_slugs = url.split("/")
     repo_name = repo_slugs[4]
@@ -69,27 +71,32 @@ def get_repository_content(url: str) -> dict:
     response = []
     files = {}
 
-    for i, req in enumerate(repo_urls):
-        print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
-        print(BRIGHT_YELLOW + req + RESET)
+    async with httpx.AsyncClient() as client:
+        for i, req in enumerate(repo_urls):
+            print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
+            print(BRIGHT_YELLOW + req + RESET)
 
-        response.append(requests.get(req).json())
+            res = await client.get(req)
+            res.raise_for_status()
+            response.append(res.json())
 
-        if response:
-            for res in response:
-                for content in res:
-                    # fetch files and directories
-                    if content["type"] == "file":
-                        if content["name"] not in files:
-                            files[content["name"]] = {}
-                        files[content["name"]]["url"] = content["url"]
-                        files[content["name"]]["download_url"] = content["download_url"]
-                    else:
-                        # if the content is dir then create a new requests
-                        # to fetch files inside it
-                        repo_urls.append(content["url"])
-        response.clear()
-    print()
+            if response:
+                for res in response:
+                    for content in res:
+                        # fetch files and directories
+                        if content["type"] == "file":
+                            if content["name"] not in files:
+                                files[content["name"]] = {}
+                            files[content["name"]]["url"] = content["url"]
+                            files[content["name"]]["download_url"] = content[
+                                "download_url"
+                            ]
+                        else:
+                            # if the content is dir then create a new requests
+                            # to fetch files inside it
+                            repo_urls.append(content["url"])
+            response.clear()
+        print()
 
     return files
 
@@ -142,9 +149,9 @@ def select_files(files: dict):
     return selected_file_urls
 
 
-def download_single_file(
-    session: requests.Session, file_name: str, download_url: str, index: int
-):
+async def download_single_file(
+    client: httpx.AsyncClient, file_name: str, download_url: str, index: int
+) -> Path:
     download_path = DOWNLOAD_DIR / file_name
 
     if download_path.exists():
@@ -154,12 +161,13 @@ def download_single_file(
         ts = int(time.time())
         url = f"{download_url}?ts={ts}"
 
-        response = session.get(url, timeout=10, allow_redirects=True)
+        response = await client.get(url, timeout=10, follow_redirects=True)
         response.raise_for_status()
-        with download_path.open("wb") as file:
-            for chunk in response.iter_content(chunk_size=512 * 1024):
+
+        async with aiofiles.open(download_path, "wb") as f:
+            async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
                 if chunk:
-                    file.write(chunk)
+                    await f.write(chunk)
 
         print(
             f"{BRIGHT_GREEN}[{index + 1}]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}\n"
@@ -167,20 +175,22 @@ def download_single_file(
     return download_path
 
 
-def download_files(files):
+async def download_files(files) -> list[Path] | None:
     if not files:
         return
 
-    with requests.Session() as session:
-        file_paths = [
-            download_single_file(session, name, url, i)
-            for i, (name, url) in enumerate(files.items())
-        ]
+    async with httpx.AsyncClient() as client:
+        async with asyncio.TaskGroup() as tg:
+            tasks = [
+                tg.create_task(download_single_file(client, name, url, i))
+                for i, (name, url) in enumerate(files.items())
+            ]
+        file_paths = [task.result() for task in tasks]
 
     return file_paths
 
 
-def main():
+async def main():
     api_status = check_api_request_limit()
     if api_status["used_all"]:
         print(BRIGHT_RED + "Github API rate limit reached!" + RESET)
@@ -194,7 +204,7 @@ def main():
 
     # fetch files from repository
     repo = get_repository_url()
-    repo_content = get_repository_content(repo)
+    repo_content = await get_repository_content(repo)
 
     file_fetch_start = time.perf_counter()
 
@@ -204,7 +214,7 @@ def main():
     download_start = time.perf_counter()
 
     # download selected files
-    file_paths = download_files(selected_files)
+    file_paths = await download_files(selected_files)
 
     finish_time = time.perf_counter()
 
@@ -218,7 +228,7 @@ def main():
         f"\nFetched {len(repo_content)} files in: {BRIGHT_RED}{fetch_time:.2f}{RESET} seconds. {(fetch_time / total_time) * 100:.2f}% of total time.",
     )
     print(
-        f"\Selected {len(selected_files)} files in: {BRIGHT_RED}{select_time:.2f}{RESET} seconds. {(select_time / total_time) * 100:.2f}% of total time.",
+        f"Selected {len(selected_files)} files in: {BRIGHT_RED}{select_time:.2f}{RESET} seconds. {(select_time / total_time) * 100:.2f}% of total time.",
     )
     print(
         f"Downloaded {len(file_paths)} files in: {BRIGHT_RED}{download_time:.2f}{RESET} seconds. {(download_time / total_time) * 100:.2f}% of total time.",
@@ -238,4 +248,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
