@@ -45,32 +45,11 @@ def check_api_request_limit():
     }
 
 
-async def get_repository_content(url: str) -> dict:
+async def get_repository_content(owner, name, path) -> dict:
     print("\nFetching repository contents...\n")
-    repo_slugs = url.split("/")
-    repo_name = repo_slugs[4]
-    repo_owner = repo_slugs[3]
-    repo_branch = repo_slugs[6] if len(repo_slugs) > 5 else "main"
-    path = ""
-
-    if len(repo_slugs) > 5:
-        path = "/".join(repo_slugs[7:])
-
-    print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
-    print(BRIGHT_YELLOW + repo_name + RESET)
-
-    print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
-    print(BRIGHT_YELLOW + repo_owner + RESET)
-
-    print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
-    print(BRIGHT_YELLOW + repo_branch + RESET)
-
-    print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
-    print(BRIGHT_YELLOW + path + RESET)
-    print()
 
     repo_urls = [
-        f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{path}",
+        f"https://api.github.com/repos/{owner}/{name}/contents/{path}",
     ]
 
     response = []
@@ -214,9 +193,33 @@ async def main():
 
     start_time = time.perf_counter()
 
-    # fetch files from repository
+    # get repository
     repo = get_repository_url()
-    repo_content = await get_repository_content(repo)
+
+    repo_slugs = repo.split("/")
+    repo_name = repo_slugs[4]
+    repo_owner = repo_slugs[3]
+    repo_branch = repo_slugs[6] if len(repo_slugs) > 5 else "main"
+    path = ""
+
+    if len(repo_slugs) > 5:
+        path = "/".join(repo_slugs[7:])
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
+    print(BRIGHT_YELLOW + repo_name + RESET)
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
+    print(BRIGHT_YELLOW + repo_owner + RESET)
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
+    print(BRIGHT_YELLOW + repo_branch + RESET)
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
+    print(BRIGHT_YELLOW + path + RESET)
+    print()
+
+    # fetch repository content
+    repo_content = await get_repository_content(repo_owner, repo_name, path)
 
     file_fetch_start = time.perf_counter()
 
