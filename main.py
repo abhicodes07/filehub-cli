@@ -1,25 +1,33 @@
-import os
 import asyncio
-import aiofiles
+import os
 import subprocess
 import sys
 import time
-import httpx
 from datetime import datetime
 from pathlib import Path
 
-RESET = "\033[0m"  # called to return to standard terminal text color
+import aiofiles
+import httpx
 
+# terminal colors
+RESET = "\033[0m"  # called to return to standard terminal text color
 BRIGHT_RED = "\033[91m"
 BRIGHT_GREEN = "\033[92m"
 BRIGHT_YELLOW = "\033[93m"
 WHITE = "\033[97m"
 
+# download path
 DOWNLOAD_DIR = Path("filehub_downloads")
 
 # limit download to only 4 cpus
 DOWNLOAD_LIMIT = 4
 CPU_WORKERS = os.cpu_count()
+
+# flags
+REPO = False
+PATH = False
+BRANCH = False
+HELP = False
 
 
 def get_arguments() -> list[str]:
@@ -206,7 +214,15 @@ async def main() -> None:
     repo_slugs = args[1].split("/")
     repo_name = repo_slugs[4]
     repo_owner = repo_slugs[3]
-    repo_branch = repo_slugs[6] if len(repo_slugs) > 5 else "main"
+
+    repo_branch = "main"
+
+    if ("-b" in args) ^ ("--branch" in args):
+        if "-b" in args:
+            repo_branch = args[args.index("-b") + 1]
+        if "--branch" in args:
+            repo_branch = args[args.index("--branch") + 1]
+
     path = ""
 
     if len(repo_slugs) > 5:
