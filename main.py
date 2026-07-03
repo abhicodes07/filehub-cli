@@ -8,8 +8,6 @@ import httpx
 from datetime import datetime
 from pathlib import Path
 
-import requests
-
 RESET = "\033[0m"  # called to return to standard terminal text color
 
 BRIGHT_RED = "\033[91m"
@@ -24,19 +22,20 @@ DOWNLOAD_LIMIT = 4
 CPU_WORKERS = os.cpu_count()
 
 
-def get_repository_url() -> str:
-    repo_url = sys.argv[1:]
-    return repo_url[0]
+def get_arguments() -> list[str]:
+    return sys.argv
 
 
 def check_api_request_limit() -> dict:
-    response = requests.get("https://api.github.com/rate_limit").json()
+    response = httpx.get("https://api.github.com/rate_limit").json()
     rate_remaining = response["rate"]["remaining"]
     rate_used = response["rate"]["used"]
     reset_time = datetime.fromtimestamp(response["rate"]["reset"])
     used_all = False
+
     if rate_remaining == 0 or rate_used == 60:
         used_all = True
+
     return {
         "rate_remaining": rate_remaining,
         "rate_used": rate_used,
@@ -169,7 +168,7 @@ async def download_files(files: dict[str, str] | None = None) -> list[Path] | No
     if not files:
         return
 
-    # NOTE: LIMIT PROCESSES SPAWN LIMIT IN CPU IN CASE THERE ARE THOURSNADS OF REQUESTS
+    # NOTE: LIMIT PROCESSES SPAWN LIMIT IN CPU IN CASE THERE ARE THOUSANDS OF REQUESTS
     dl_semaphore = asyncio.Semaphore(DOWNLOAD_LIMIT)
     async with httpx.AsyncClient() as client:
         async with asyncio.TaskGroup() as tg:
@@ -182,7 +181,17 @@ async def download_files(files: dict[str, str] | None = None) -> list[Path] | No
     return file_paths
 
 
-async def main():
+async def main() -> None:
+    args = get_arguments()
+
+    if len(args) < 2 or "-h" in args or "--help" in args:
+        print("usage: [-h | --help]")
+        print("       [-b | --branch <branch>]")
+        print("       [-p | --path <path>]")
+        print()
+        print("example: python main.py https://github.com/filehub-cli.git -b main")
+        return
+
     api_status = check_api_request_limit()
     if api_status["used_all"]:
         print(BRIGHT_RED + "Github API rate limit reached!" + RESET)
@@ -190,14 +199,11 @@ async def main():
         print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
         return
 
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
     start_time = time.perf_counter()
 
-    # get repository
-    repo = get_repository_url()
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    repo_slugs = repo.split("/")
+    repo_slugs = args[1].split("/")
     repo_name = repo_slugs[4]
     repo_owner = repo_slugs[3]
     repo_branch = repo_slugs[6] if len(repo_slugs) > 5 else "main"
