@@ -6,6 +6,7 @@
 - [ ] Download path feature
 - [ ] Specific branch feature
 - [ ] `fzf` alternative if it's not installed
+- [ ] preserve the path of the file, download files in the respective directory structure
 
 ## Resources
 
