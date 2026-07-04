@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from subprocess import CalledProcessError
 from pathlib import Path
 
 import aiofiles
@@ -123,7 +124,7 @@ def select_files(files: dict | None = None) -> dict | None:
             check=True,
             input=input,
         )
-    except ChildProcessError:
+    except CalledProcessError:
         print("No file selected, Aborting!")
         return
 
