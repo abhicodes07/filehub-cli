@@ -7,6 +7,7 @@
 - [ ] Specific branch feature
 - [ ] `fzf` alternative if it's not installed
 - [ ] preserve the path of the file, download files in the respective directory structure
+- [ ] download files in the directory same as repository name instea of `filehub_downloads`
 
 ## Resources
 
