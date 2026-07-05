@@ -208,6 +208,26 @@ async def download_files(files: dict[str, dict] | None = None) -> list[Path] | N
     return file_paths
 
 
+def timings(start, fetch, download, finish):
+    fetch_time = fetch - start
+    select_time = download - fetch
+    download_time = finish - download
+    total_time = finish - start
+
+    print(
+        f"\nFetched files in: {BRIGHT_RED}{fetch_time:.2f}{RESET} seconds. {(fetch_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Selected files in: {BRIGHT_RED}{select_time:.2f}{RESET} seconds. {(select_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Downloaded files in: {BRIGHT_RED}{download_time:.2f}{RESET} seconds. {(download_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Total execution time: {BRIGHT_RED}{total_time:.2f}{RESET} seconds. {(total_time / total_time) * 100:.2f}% of total time.",
+    )
+
+
 async def main() -> None:
     args = get_arguments()
 
@@ -267,37 +287,18 @@ async def main() -> None:
 
     # fetch repository content
     repo_content = await get_repository_content(repo_owner, repo_name, path)
-
     file_fetch_start = time.perf_counter()
 
     # select files
     selected_files = select_files(repo_content)
-
     download_start = time.perf_counter()
 
     # download selected files
     file_paths = await download_files(selected_files)
-
+    print(file_paths)
     finish_time = time.perf_counter()
 
-    # calculate execution time
-    fetch_time = file_fetch_start - start_time
-    select_time = download_start - file_fetch_start
-    download_time = finish_time - download_start
-    total_time = finish_time - start_time
-
-    print(
-        f"\nFetched {len(repo_content)} files in: {BRIGHT_RED}{fetch_time:.2f}{RESET} seconds. {(fetch_time / total_time) * 100:.2f}% of total time.",
-    )
-    print(
-        f"Selected {len(selected_files)} files in: {BRIGHT_RED}{select_time:.2f}{RESET} seconds. {(select_time / total_time) * 100:.2f}% of total time.",
-    )
-    print(
-        f"Downloaded {len(file_paths)} files in: {BRIGHT_RED}{download_time:.2f}{RESET} seconds. {(download_time / total_time) * 100:.2f}% of total time.",
-    )
-    print(
-        f"Total execution time: {BRIGHT_RED}{total_time:.2f}{RESET} seconds. {(total_time / total_time) * 100:.2f}% of total time.",
-    )
+    timings(start_time, file_fetch_start, download_start, finish_time)
 
     api_status = check_api_request_limit()
     if not api_status["used_all"]:
