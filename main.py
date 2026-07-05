@@ -84,7 +84,8 @@ async def get_repository_content(owner: str, name: str, path: str) -> dict:
                             files[content["name"]]["download_url"] = content[
                                 "download_url"
                             ]
-                            files[content["name"]]["path"] = content["path"]
+                            file_path = "/".join(content["path"].split("/")[:-1])
+                            files[content["name"]]["path"] = file_path
                         else:
                             # if the content is dir then create a new requests
                             # to fetch files inside it
@@ -99,7 +100,7 @@ def select_files(files: dict | None = None) -> dict | None:
     if not files:
         return
     file_names = list(files.keys())
-    input = "\n".join(file_names)
+    file_input = "\n".join(file_names)
 
     try:
         result = subprocess.run(
@@ -124,7 +125,7 @@ def select_files(files: dict | None = None) -> dict | None:
             capture_output=True,
             text=True,
             check=True,
-            input=input,
+            input=file_input,
         )
     except CalledProcessError:
         print("No file selected, Aborting!")
@@ -137,7 +138,10 @@ def select_files(files: dict | None = None) -> dict | None:
 
     for i, selected in enumerate(selected_files, start=1):
         print(f"\t{BRIGHT_GREEN}[{i}]{RESET} {selected}")
-        selected_file_urls[selected] = files[selected]["download_url"]
+        if selected not in selected_file_urls:
+            selected_file_urls[selected] = {}
+        selected_file_urls[selected]["url"] = files[selected]["download_url"]
+        selected_file_urls[selected]["path"] = files[selected]["path"]
     print()
 
     return selected_file_urls
@@ -148,9 +152,12 @@ async def download_single_file(
     semaphore: asyncio.Semaphore,
     file_name: str,
     download_url: str,
+    path: str,
     index: int,
 ) -> Path:
-    download_path = DOWNLOAD_DIR / file_name
+    file_path = Path(DOWNLOAD_DIR / path)
+    file_path.mkdir(parents=True, exist_ok=True)
+    download_path = file_path / file_name
 
     if download_path.exists():
         print(f"{BRIGHT_YELLOW}{file_name}{RESET} already exists!\n")
@@ -175,7 +182,7 @@ async def download_single_file(
     return download_path
 
 
-async def download_files(files: dict[str, str] | None = None) -> list[Path] | None:
+async def download_files(files: dict[str, dict] | None = None) -> list[Path] | None:
     if not files:
         return
 
@@ -184,8 +191,17 @@ async def download_files(files: dict[str, str] | None = None) -> list[Path] | No
     async with httpx.AsyncClient() as client:
         async with asyncio.TaskGroup() as tg:
             tasks = [
-                tg.create_task(download_single_file(client, dl_semaphore, name, url, i))
-                for i, (name, url) in enumerate(files.items())
+                tg.create_task(
+                    download_single_file(
+                        client,
+                        dl_semaphore,
+                        file,
+                        files[file]["url"],
+                        files[file]["path"],
+                        i,
+                    )
+                )
+                for i, file in enumerate(files)
             ]
         file_paths = [task.result() for task in tasks]
 
@@ -225,11 +241,6 @@ async def main() -> None:
     if len(slugs) > 4:
         path = "/".join(slugs[4:])
 
-    if repo_name:
-        global DOWNLOAD_DIR
-        DOWNLOAD_DIR = Path(repo_name)
-        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
     if ("-b" in args) ^ ("--branch" in args):
         if "-b" in args:
             repo_branch = args[args.index("-b") + 1]
@@ -248,6 +259,11 @@ async def main() -> None:
     print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
     print(BRIGHT_YELLOW + path + RESET)
     print()
+
+    if repo_name:
+        global DOWNLOAD_DIR
+        DOWNLOAD_DIR = Path(repo_name)
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     # fetch repository content
     repo_content = await get_repository_content(repo_owner, repo_name, path)
