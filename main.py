@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from subprocess import CalledProcessError
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
@@ -17,8 +18,8 @@ BRIGHT_GREEN = "\033[92m"
 BRIGHT_YELLOW = "\033[93m"
 WHITE = "\033[97m"
 
-# download path
-DOWNLOAD_DIR = Path("filehub_downloads")
+# download dir
+DOWNLOAD_DIR = Path("Filehub")
 
 # limit download to only 4 cpus
 DOWNLOAD_LIMIT = 4
@@ -83,6 +84,7 @@ async def get_repository_content(owner: str, name: str, path: str) -> dict:
                             files[content["name"]]["download_url"] = content[
                                 "download_url"
                             ]
+                            files[content["name"]]["path"] = content["path"]
                         else:
                             # if the content is dir then create a new requests
                             # to fetch files inside it
@@ -210,24 +212,29 @@ async def main() -> None:
 
     start_time = time.perf_counter()
 
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    url = urlsplit(args[1])
+    slugs = url.path.strip("/").split("/")
 
-    repo_slugs = args[1].split("/")
-    repo_name = repo_slugs[4]
-    repo_owner = repo_slugs[3]
-
+    repo_owner = slugs[0]
+    repo_name = slugs[1]
     repo_branch = "main"
+    if "tree" in slugs:
+        repo_branch = slugs[3]
+
+    path = ""
+    if len(slugs) > 4:
+        path = "/".join(slugs[4:])
+
+    if repo_name:
+        global DOWNLOAD_DIR
+        DOWNLOAD_DIR = Path(repo_name)
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     if ("-b" in args) ^ ("--branch" in args):
         if "-b" in args:
             repo_branch = args[args.index("-b") + 1]
         if "--branch" in args:
             repo_branch = args[args.index("--branch") + 1]
-
-    path = ""
-
-    if len(repo_slugs) > 5:
-        path = "/".join(repo_slugs[7:])
 
     print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
     print(BRIGHT_YELLOW + repo_name + RESET)
