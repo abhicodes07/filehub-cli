@@ -1,16 +1,17 @@
 ## Todos
 
 - [ ] Convert the program into CLI.
-- [ ] Use `click` or `argparse` for better CLI tool management
+- [x] Use `click` or `argparse` for better CLI tool management
 - [ ] Add file download progress bar
 - [ ] Download path feature
-- [ ] Specific branch feature
+- [x] Specific branch feature
 - [ ] `fzf` alternative if it's not installed
 - [x] preserve the path of the file, download files in the respective directory structure
 - [x] download files in the directory same as repository name instea of `filehub_downloads`
-- [ ] handle if the repository URL is not provided.
-- [ ] check if the provided url is a Github url
-- [ ] hangle if github repo doesn't exits
+- [x] handle if the repository URL is not provided.
+- [x] check if the provided url is a Github url
+- [ ] handle if github repo doesn't exits
+- [ ] if files from different branches are downloaded then download them seperately in their respective branch named directory
 
 ```
 -b : branch
