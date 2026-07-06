@@ -27,10 +27,8 @@ DOWNLOAD_LIMIT = 4
 CPU_WORKERS = os.cpu_count()
 
 # flags
-REPO = False
 PATH = False
 BRANCH = False
-HELP = False
 
 
 def get_arguments() -> argparse.Namespace:
@@ -38,16 +36,18 @@ def get_arguments() -> argparse.Namespace:
         description="A simple CLI program to download specific files from Github repositories."
     )
 
-    parser.add_argument("url", type=str, help="Required Github repository URL")
+    parser.add_argument("URL", type=str, help="Required Github repository URL.")
+    parser.add_argument("-p", "--path", help="Download path of the files.")
     parser.add_argument(
         "-b",
         "--branch",
         nargs="?",
-        default="main",
-        help="Specify branch. Defaults to 'main'",
+        default=None,
+        help="Specify repository branch.",
     )
+
     args = parser.parse_args()
-    url = urlsplit(args.url)
+    url = urlsplit(args.URL)
 
     if url.scheme not in ("http", "https"):
         parser.error("URL must start with http:// or https://")
@@ -56,6 +56,10 @@ def get_arguments() -> argparse.Namespace:
         parser.error(f"{BRIGHT_RED}{args.url}{RESET} is not a valid Github URL!")
 
     return args
+
+
+def parse_url_info(cmd_args: argparse.Namespace) -> None:
+    pass
 
 
 def check_api_request_limit() -> dict[str, Any]:
@@ -96,7 +100,6 @@ async def get_repository_content(
             print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
             print(BRIGHT_YELLOW + req + RESET)
 
-            print(req)
             res = await client.get(req)
             res.raise_for_status()
             response.append(res.json())
@@ -236,7 +239,7 @@ async def download_files(files: dict[str, dict] | None = None) -> list[Path] | N
     return file_paths
 
 
-def timings(start, fetch, download, finish):
+def timing(start, fetch, download, finish):
     fetch_time = fetch - start
     select_time = download - fetch
     download_time = finish - download
@@ -256,18 +259,8 @@ def timings(start, fetch, download, finish):
     )
 
 
-def print_help():
-    print("usage: [-h | --help]")
-    print("       [-b <branch>] | Defaults to 'main'")
-    print("       [-p <path>]")
-    print()
-    print("example: python main.py https://github.com/filehub-cli.git -b main")
-    return
-
-
 async def main() -> None:
     args = get_arguments()
-    print(args)
 
     api_status = check_api_request_limit()
     if api_status["used_all"]:
@@ -276,9 +269,9 @@ async def main() -> None:
         print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
         return
 
-    start_time = time.perf_counter()
+    # start_time = time.perf_counter()
 
-    repo = urlsplit(args.url)
+    repo = urlsplit(args.URL)
     slugs = repo.path.strip("/").split("/")
 
     repo_owner = slugs[0]
@@ -303,24 +296,23 @@ async def main() -> None:
         print(BRIGHT_YELLOW + path + RESET)
     print()
 
-    global DOWNLOAD_DIR
-    DOWNLOAD_DIR = Path(repo_name)
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
     # fetch repository content
     repo_content = await get_repository_content(
         repo_owner, repo_name, repo_branch, path
     )
-    file_fetch_start = time.perf_counter()
+    # file_fetch_start = time.perf_counter()
 
     # select files
     selected_files = select_files(repo_content)
-    download_start = time.perf_counter()
+    # download_start = time.perf_counter()
 
     # download selected files
+    global DOWNLOAD_DIR
+    DOWNLOAD_DIR = Path(repo_name)
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
     file_paths = await download_files(selected_files)
-    print(file_paths)
-    finish_time = time.perf_counter()
+    # finish_time = time.perf_counter()
 
     # timings(start_time, file_fetch_start, download_start, finish_time)
 
