@@ -1,12 +1,12 @@
 import asyncio
 import os
 import subprocess
-import sys
 import time
 import argparse
 from datetime import datetime
 from subprocess import CalledProcessError
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import aiofiles
@@ -33,7 +33,7 @@ BRANCH = False
 HELP = False
 
 
-def get_arguments():
+def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="A simple CLI program to download specific files from Github repositories."
     )
@@ -49,18 +49,16 @@ def get_arguments():
     args = parser.parse_args()
     url = urlsplit(args.url)
 
-    print(url)
-
     if url.scheme not in ("http", "https"):
         parser.error("URL must start with http:// or https://")
 
     if url.netloc != "github.com":
         parser.error(f"{BRIGHT_RED}{args.url}{RESET} is not a valid Github URL!")
 
-    return args.url
+    return args
 
 
-def check_api_request_limit() -> dict:
+def check_api_request_limit() -> dict[str, Any]:
     response = httpx.get("https://api.github.com/rate_limit").json()
     rate_remaining = response["rate"]["remaining"]
     rate_used = response["rate"]["used"]
@@ -78,11 +76,16 @@ def check_api_request_limit() -> dict:
     }
 
 
-async def get_repository_content(owner: str, name: str, path: str) -> dict:
+async def get_repository_content(
+    owner: str, name: str, branch: str, path: str | None = None
+) -> dict:
     print("\nFetching repository contents...\n")
 
+    # f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref='{branch}'",
     repo_urls = [
-        f"https://api.github.com/repos/{owner}/{name}/contents/{path}",
+        f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref={branch}"
+        if path
+        else f"https://api.github.com/repos/{owner}/{name}/contents?ref={branch}",
     ]
 
     response = []
@@ -93,6 +96,7 @@ async def get_repository_content(owner: str, name: str, path: str) -> dict:
             print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
             print(BRIGHT_YELLOW + req + RESET)
 
+            print(req)
             res = await client.get(req)
             res.raise_for_status()
             response.append(res.json())
@@ -262,77 +266,72 @@ def print_help():
 
 
 async def main() -> None:
-    repo = get_arguments()
-    print(repo)
-    # api_status = check_api_request_limit()
-    # if api_status["used_all"]:
-    #     print(BRIGHT_RED + "Github API rate limit reached!" + RESET)
-    #     print(BRIGHT_RED + "Try again in: " + RESET, end="")
-    #     print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
-    #     return
-    #
-    # start_time = time.perf_counter()
-    #
-    # url = urlsplit(args[1])
-    # slugs = url.path.strip("/").split("/")
-    #
-    # repo_owner = slugs[0]
-    # repo_name = slugs[1]
-    # repo_branch = "main"
-    # if "tree" in slugs:
-    #     repo_branch = slugs[3]
-    #
-    # path = ""
-    # if len(slugs) > 4:
-    #     path = "/".join(slugs[4:])
-    #
-    # if ("-b" in args) ^ ("--branch" in args):
-    #     if "-b" in args:
-    #         repo_branch = args[args.index("-b") + 1]
-    #     if "--branch" in args:
-    #         repo_branch = args[args.index("--branch") + 1]
-    #
-    # print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
-    # print(BRIGHT_YELLOW + repo_name + RESET)
-    #
-    # print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
-    # print(BRIGHT_YELLOW + repo_owner + RESET)
-    #
-    # print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
-    # print(BRIGHT_YELLOW + repo_branch + RESET)
-    #
-    # print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
-    # print(BRIGHT_YELLOW + path + RESET)
-    # print()
-    #
-    # if repo_name:
-    #     global DOWNLOAD_DIR
-    #     DOWNLOAD_DIR = Path(repo_name)
-    #     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    #
-    # # fetch repository content
-    # repo_content = await get_repository_content(repo_owner, repo_name, path)
-    # file_fetch_start = time.perf_counter()
-    #
-    # # select files
-    # selected_files = select_files(repo_content)
-    # download_start = time.perf_counter()
-    #
-    # # download selected files
-    # file_paths = await download_files(selected_files)
-    # print(file_paths)
-    # finish_time = time.perf_counter()
-    #
+    args = get_arguments()
+    print(args)
+
+    api_status = check_api_request_limit()
+    if api_status["used_all"]:
+        print(BRIGHT_RED + "Github API rate limit reached!" + RESET)
+        print(BRIGHT_RED + "Try again in: " + RESET, end="")
+        print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
+        return
+
+    start_time = time.perf_counter()
+
+    repo = urlsplit(args.url)
+    slugs = repo.path.strip("/").split("/")
+
+    repo_owner = slugs[0]
+    repo_name = slugs[1]
+    repo_branch = args.branch
+
+    path = None
+    if len(slugs) > 4:
+        path = "/".join(slugs[4:])
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
+    print(BRIGHT_YELLOW + repo_name + RESET)
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
+    print(BRIGHT_YELLOW + repo_owner + RESET)
+
+    print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
+    print(BRIGHT_YELLOW + repo_branch + RESET)
+
+    if path:
+        print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
+        print(BRIGHT_YELLOW + path + RESET)
+    print()
+
+    global DOWNLOAD_DIR
+    DOWNLOAD_DIR = Path(repo_name)
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    # fetch repository content
+    repo_content = await get_repository_content(
+        repo_owner, repo_name, repo_branch, path
+    )
+    file_fetch_start = time.perf_counter()
+
+    # select files
+    selected_files = select_files(repo_content)
+    download_start = time.perf_counter()
+
+    # download selected files
+    file_paths = await download_files(selected_files)
+    print(file_paths)
+    finish_time = time.perf_counter()
+
     # timings(start_time, file_fetch_start, download_start, finish_time)
-    #
-    # api_status = check_api_request_limit()
-    # if not api_status["used_all"]:
-    #     print(
-    #         f"\n{BRIGHT_YELLOW}[!]{RESET} Github API Remaining Rates: {BRIGHT_YELLOW}{api_status['rate_remaining']}{RESET}"
-    #     )
-    #     print(
-    #         f"{BRIGHT_YELLOW}[!]{RESET} Github API Used Rates: {BRIGHT_YELLOW}{api_status['rate_used']}{RESET}"
-    #     )
+
+    api_status = check_api_request_limit()
+    if not api_status["used_all"]:
+        print(
+            f"\n{BRIGHT_YELLOW}[!]{RESET} Github API Remaining Rates: {BRIGHT_YELLOW}{api_status['rate_remaining']}{RESET}"
+        )
+        print(
+            f"{BRIGHT_YELLOW}[!]{RESET} Github API Used Rates: {BRIGHT_YELLOW}{api_status['rate_used']}{RESET}"
+        )
 
 
 if __name__ == "__main__":
