@@ -27,8 +27,20 @@ DOWNLOAD_LIMIT = 4
 CPU_WORKERS = os.cpu_count()
 
 # flags
-PATH = False
 BRANCH = False
+
+
+class BranchNotFoundError(Exception):
+    """Raised when the user specified branch does not exist."""
+
+    def __init__(self, branch: str, repository: str) -> None:
+        self.branch = branch
+        self.repository = repository
+        message = (
+            f"'{self.branch}' Branch does not exist on '{self.repository}' repository."
+        )
+
+        super().__init__(message)
 
 
 def get_arguments() -> argparse.Namespace:
@@ -36,8 +48,8 @@ def get_arguments() -> argparse.Namespace:
         description="A simple CLI program to download specific files from Github repositories."
     )
 
-    parser.add_argument("URL", type=str, help="Required Github repository URL.")
-    parser.add_argument("-p", "--path", help="Download path of the files.")
+    parser.add_argument("url", type=str, help="Required Github repository URL.")
+    parser.add_argument("-p", "--path", help="Download path.")
     parser.add_argument(
         "-b",
         "--branch",
@@ -47,19 +59,69 @@ def get_arguments() -> argparse.Namespace:
     )
 
     args = parser.parse_args()
-    url = urlsplit(args.URL)
+    repo_url = urlsplit(args.url)
 
-    if url.scheme not in ("http", "https"):
+    if repo_url.scheme not in ("http", "https"):
         parser.error("URL must start with http:// or https://")
 
-    if url.netloc != "github.com":
+    if repo_url.netloc != "github.com":
         parser.error(f"{BRIGHT_RED}{args.url}{RESET} is not a valid Github URL!")
+
+    if args.branch:
+        global BRANCH
+        BRANCH = True
 
     return args
 
 
-def parse_url_info(cmd_args: argparse.Namespace) -> None:
-    pass
+def check_branch_status(owner: str, repo: str, branch: str) -> bool:
+    # verify the existence of the branch if provided as an argument.
+    branch_url = f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}"
+
+    res = httpx.get(branch_url)
+    if res.status_code == 200:
+        return True
+
+    return False
+
+
+def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
+    info = {}
+
+    url = urlsplit(cmd_args.url)
+    segments = url.path.strip("/").split("/")
+    # print(segments)
+
+    info["owner"] = segments[0]
+    info["repository"] = segments[1]
+    info["branch"] = None
+    info["path"] = None
+
+    # if url already consists the branch or has `blob` in it
+    # and user provides a different branch
+    # as an argument then ignore the branch flag
+    global BRANCH
+    if "tree" in segments or "blob" in segments and BRANCH:
+        BRANCH = False
+
+    # if branch is provided as an argument
+    if BRANCH:
+        # verify the existence of user provided branch
+        if not check_branch_status(info["owner"], info["repository"], cmd_args.branch):
+            raise BranchNotFoundError(cmd_args.branch, info["repository"])
+
+        info["branch"] = cmd_args.branch
+    else:
+        # find branch in url
+        if len(segments) > 2:
+            for i in range(1, len(segments)):
+                branch_name = "/".join(segments[3:][:i])
+                if check_branch_status(info["owner"], info["repository"], branch_name):
+                    info["branch"] = branch_name
+                    info["path"] = "/".join(segments[3:][i:])
+                    break
+    # print(info)
+    return info
 
 
 def check_api_request_limit() -> dict[str, Any]:
@@ -261,6 +323,7 @@ def timing(start, fetch, download, finish):
 
 async def main() -> None:
     args = get_arguments()
+    repo = parse_repo_url(args)
 
     api_status = check_api_request_limit()
     if api_status["used_all"]:
@@ -269,52 +332,33 @@ async def main() -> None:
         print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
         return
 
-    # start_time = time.perf_counter()
-
-    repo = urlsplit(args.URL)
-    slugs = repo.path.strip("/").split("/")
-
-    repo_owner = slugs[0]
-    repo_name = slugs[1]
-    repo_branch = args.branch
-
-    path = None
-    if len(slugs) > 4:
-        path = "/".join(slugs[4:])
-
     print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
-    print(BRIGHT_YELLOW + repo_name + RESET)
+    print(BRIGHT_YELLOW + repo["repository"] + RESET)
 
     print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
-    print(BRIGHT_YELLOW + repo_owner + RESET)
+    print(BRIGHT_YELLOW + repo["owner"] + RESET)
 
     print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
-    print(BRIGHT_YELLOW + repo_branch + RESET)
+    print(BRIGHT_YELLOW + repo["branch"] + RESET)
 
-    if path:
-        print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
-        print(BRIGHT_YELLOW + path + RESET)
+    print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
+    print(BRIGHT_YELLOW + repo["path"] + RESET)
     print()
 
-    # fetch repository content
+    # # fetch repository content
     repo_content = await get_repository_content(
-        repo_owner, repo_name, repo_branch, path
+        repo["owner"], repo["repository"], repo["branch"], repo["path"]
     )
-    # file_fetch_start = time.perf_counter()
 
     # select files
     selected_files = select_files(repo_content)
-    # download_start = time.perf_counter()
 
     # download selected files
     global DOWNLOAD_DIR
-    DOWNLOAD_DIR = Path(repo_name)
+    DOWNLOAD_DIR = Path(repo["repository"])
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     file_paths = await download_files(selected_files)
-    # finish_time = time.perf_counter()
-
-    # timings(start_time, file_fetch_start, download_start, finish_time)
 
     api_status = check_api_request_limit()
     if not api_status["used_all"]:
