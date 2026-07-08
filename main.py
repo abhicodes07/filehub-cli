@@ -197,7 +197,7 @@ async def get_repository_content(
                                 files[content["name"]]["path"] = file_path
                             else:
                                 # if the content is dir then create a new requests
-                                # to fetch files inside it
+                                # to fetch files from it
                                 repo_urls.append(content["url"])
                     else:
                         if res["name"] not in files:
