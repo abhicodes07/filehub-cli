@@ -22,6 +22,8 @@
 - [ ] set CPU limit flag `-c` or `--cpu` to let users specifiy the number of files to be downloaded at a time.
 - [ ] add option such as `-z` or `--zip` to download the zip archive of the repository.
 
+- [ ] if fzf is not installed then we can make optional using `--fzf` and ask users to provide the file names manually on input?
+
 > [!ERROR] ERROR [fixed]
 > handle the only file url error
 
@@ -41,9 +43,16 @@
 - some url: `https://github.com/openclaw/openclaw/tree/feat/azure-mai-models/config/tsconfig` where branch is `feat/azure-mai-models`
 - file url: `https://github.com/openclaw/openclaw/blob/feat/azure-mai-models/config/tsconfig/oxlint.extensions.json`
 
+## Behaviour
+
+If default unauthorized API access rate exceeded, then automatically switch to use authentication if provided using few methods.
+To avoid this, use `--use-auth` option to always use authenticated requests.
+
 ## Resources
 
 - [Progress bar](https://stackoverflow.com/questions/6415402/creating-a-progress-bar-in-a-cli-application)
 - [Click module](https://realpython.com/python-click/#creating-command-line-interfaces-with-click-and-python)
 - [Packaging CLI Tool](https://packaging.python.org/en/latest/guides/creating-command-line-tools/)
 - [argparsing](https://gist.github.com/abalter/605773b34a68bb370bf84007ee55a130)
+
+- [selectable interface, maybe](https://github.com/dmartinezm/cli_table_scroll/tree/master)
