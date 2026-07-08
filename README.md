@@ -18,13 +18,14 @@
 - [ ] check internet connectivity
 - [ ] user authentication for more api requests
 - [x] check if branch exits or not
-- [ ] add flag such as `--preserve-path` or `--flaten` for whether to preserve the directory structure or keep it concise
+- [x] add flag such as `--preserve-path` or `--flaten` for whether to preserve the directory structure or keep it concise
 - [ ] set CPU limit flag `-c` or `--cpu` to let users specifiy the number of files to be downloaded at a time.
+- [ ] add option such as `-z` or `--zip` to download the zip archive of the repository.
 
-> [!ERROR] ERROR
+> [!ERROR] ERROR [fixed]
 > handle the only file url error
 
-> [!NOTE] NOTE
+> [!NOTE] NOTE [fixed]
 > if in case branch name looks like a path such as `feat/jobdori-122b-doctor-broad-cwd` then it might cause an error as we cannot find the branch in the URL and it might get included in the path segment of urlparse. To avoid this, loop over the path segements and make api calls until we get the 200 status and find the right branch
 
 - Main
@@ -40,13 +41,9 @@
 - some url: `https://github.com/openclaw/openclaw/tree/feat/azure-mai-models/config/tsconfig` where branch is `feat/azure-mai-models`
 - file url: `https://github.com/openclaw/openclaw/blob/feat/azure-mai-models/config/tsconfig/oxlint.extensions.json`
 
-```
--b : branch
--p : path
-```
-
 ## Resources
 
 - [Progress bar](https://stackoverflow.com/questions/6415402/creating-a-progress-bar-in-a-cli-application)
 - [Click module](https://realpython.com/python-click/#creating-command-line-interfaces-with-click-and-python)
 - [Packaging CLI Tool](https://packaging.python.org/en/latest/guides/creating-command-line-tools/)
+- [argparsing](https://gist.github.com/abalter/605773b34a68bb370bf84007ee55a130)
