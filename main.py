@@ -28,9 +28,7 @@ CPU_WORKERS = os.cpu_count()
 
 # flags
 BRANCH = False
-
-# file
-BLOB = False
+FLATTEN = False
 
 
 class BranchNotFoundError(Exception):
@@ -51,8 +49,6 @@ def get_arguments() -> argparse.Namespace:
         description="A simple CLI program to download specific files from Github repositories."
     )
 
-    parser.add_argument("url", type=str, help="Required Github repository URL.")
-    parser.add_argument("-p", "--path", help="Download path.")
     parser.add_argument(
         "-b",
         "--branch",
@@ -60,6 +56,14 @@ def get_arguments() -> argparse.Namespace:
         default=None,
         help="Specify repository branch.",
     )
+    parser.add_argument(
+        "-f",
+        "--flatten",
+        action="store_true",
+        help="Flatten the directory structure.\nBy default, directory structure of the file is preserved according to it's path on the repository.",
+    )
+    parser.add_argument("url", type=str, help="Required Github repository URL.")
+    parser.add_argument("-p", "--path", help="Download path of the file.")
 
     args = parser.parse_args()
     repo_url = urlsplit(args.url)
@@ -73,6 +77,10 @@ def get_arguments() -> argparse.Namespace:
     if args.branch:
         global BRANCH
         BRANCH = True
+
+    if args.flatten:
+        global FLATTEN
+        FLATTEN = True
 
     return args
 
@@ -106,10 +114,6 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
     global BRANCH
     if "tree" in segments or "blob" in segments and BRANCH:
         BRANCH = False
-
-    if "blob" in segments:
-        global BLOB
-        BLOB = True
 
     # if branch is provided as an argument
     if BRANCH:
@@ -152,7 +156,7 @@ def check_api_request_limit() -> dict[str, Any]:
 async def get_repository_content(
     owner: str, name: str, branch: str, path: str | None = None
 ) -> dict:
-    print("\nFetching repository contents...\n")
+    print("Fetching repository contents...\n")
 
     # f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref='{branch}'",
     repo_urls = [
@@ -166,9 +170,9 @@ async def get_repository_content(
 
     async with httpx.AsyncClient() as client:
         for i, req in enumerate(repo_urls):
-            print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
-            print(BRIGHT_YELLOW + req + RESET)
-
+            # print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
+            # print(BRIGHT_YELLOW + req + RESET)
+            #
             res = await client.get(req)
             res.raise_for_status()
             response.append(res.json())
@@ -274,6 +278,9 @@ async def download_single_file(
     path: str,
     index: int,
 ) -> Path:
+    if FLATTEN:
+        path = ""
+
     file_path = Path(DOWNLOAD_DIR / path)
     file_path.mkdir(parents=True, exist_ok=True)
     download_path = file_path / file_name
