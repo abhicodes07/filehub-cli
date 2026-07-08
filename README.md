@@ -11,9 +11,8 @@
 - [x] handle if the repository URL is not provided.
 - [x] check if the provided url is a Github url
 - [ ] handle if github repo doesn't exits
-- [ ] if the file github url is provided, download it directly
+- [x] if the file github url is provided, download it directly
 - [x] handle the branch name if it's provided in the URL
-- [ ] create a flag for whether to preserve the repository directory structure
 - [ ] handle program cancellation using `CTRL+C`
 - [ ] handle root directory cleanup if exited unexpectedly
 - [ ] check internet connectivity
