@@ -29,6 +29,9 @@ CPU_WORKERS = os.cpu_count()
 # flags
 BRANCH = False
 
+# file
+BLOB = False
+
 
 class BranchNotFoundError(Exception):
     """Raised when the user specified branch does not exist."""
@@ -104,6 +107,10 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
     if "tree" in segments or "blob" in segments and BRANCH:
         BRANCH = False
 
+    if "blob" in segments:
+        global BLOB
+        BLOB = True
+
     # if branch is provided as an argument
     if BRANCH:
         # verify the existence of user provided branch
@@ -165,24 +172,40 @@ async def get_repository_content(
             res = await client.get(req)
             res.raise_for_status()
             response.append(res.json())
-
+            # print(f"{BRIGHT_GREEN} {response} {RESET}")
             if response:
+                # loop over the list of responses
                 for res in response:
-                    for content in res:
-                        # fetch files and directories
-                        if content["type"] == "file":
-                            if content["name"] not in files:
-                                files[content["name"]] = {}
-                            files[content["name"]]["url"] = content["url"]
-                            files[content["name"]]["download_url"] = content[
-                                "download_url"
-                            ]
-                            file_path = "/".join(content["path"].split("/")[:-1])
-                            files[content["name"]]["path"] = file_path
-                        else:
-                            # if the content is dir then create a new requests
-                            # to fetch files inside it
-                            repo_urls.append(content["url"])
+                    # print(f"{BRIGHT_YELLOW} {res} {RESET}")
+                    if res["type"] == "file":
+                        if res["name"] not in files:
+                            files[res["name"]] = {}
+                        # files[res["name"]]["url"] = res["url"]
+                        files[res["name"]]["download_url"] = res["download_url"]
+
+                        # truncate the file name from path
+                        file_path = "/".join(res["path"].split("/")[:-1])
+                        files[res["name"]]["path"] = file_path
+
+                    else:
+                        # if response is a list of dict of files
+                        # loop over single content in responses
+                        for content in res:
+                            print(f"{BRIGHT_RED} {content} {RESET}")
+                            # fetch files and directories
+                            if content["type"] == "file":
+                                if content["name"] not in files:
+                                    files[content["name"]] = {}
+                                # files[content["name"]]["url"] = content["url"]
+                                files[content["name"]]["download_url"] = content[
+                                    "download_url"
+                                ]
+                                file_path = "/".join(content["path"].split("/")[:-1])
+                                files[content["name"]]["path"] = file_path
+                            else:
+                                # if the content is dir then create a new requests
+                                # to fetch files inside it
+                                repo_urls.append(content["url"])
             response.clear()
         print()
 
@@ -192,6 +215,10 @@ async def get_repository_content(
 def select_files(files: dict | None = None) -> dict | None:
     if not files:
         return
+
+    if len(files) < 2:
+        return files
+
     file_names = list(files.keys())
     file_input = "\n".join(file_names)
 
@@ -233,7 +260,7 @@ def select_files(files: dict | None = None) -> dict | None:
         print(f"\t{BRIGHT_GREEN}[{i}]{RESET} {selected}")
         if selected not in selected_file_urls:
             selected_file_urls[selected] = {}
-        selected_file_urls[selected]["url"] = files[selected]["download_url"]
+        selected_file_urls[selected]["download_url"] = files[selected]["download_url"]
         selected_file_urls[selected]["path"] = files[selected]["path"]
     print()
 
@@ -289,7 +316,7 @@ async def download_files(files: dict[str, dict] | None = None) -> list[Path] | N
                         client,
                         dl_semaphore,
                         file,
-                        files[file]["url"],
+                        files[file]["download_url"],
                         files[file]["path"],
                         i,
                     )
