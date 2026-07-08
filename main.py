@@ -97,8 +97,8 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
 
     info["owner"] = segments[0]
     info["repository"] = segments[1]
-    info["branch"] = None
-    info["path"] = None
+    info["branch"] = ""
+    info["path"] = ""
 
     # if url already consists the branch or has `blob` in it
     # and user provides a different branch
@@ -157,8 +157,8 @@ async def get_repository_content(
     # f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref='{branch}'",
     repo_urls = [
         f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref={branch}"
-        if path
-        else f"https://api.github.com/repos/{owner}/{name}/contents?ref={branch}",
+        if branch
+        else f"https://api.github.com/repos/{owner}/{name}/contents/{path}",
     ]
 
     response = []
@@ -173,25 +173,14 @@ async def get_repository_content(
             res.raise_for_status()
             response.append(res.json())
             # print(f"{BRIGHT_GREEN} {response} {RESET}")
+
             if response:
                 # loop over the list of responses
                 for res in response:
                     # print(f"{BRIGHT_YELLOW} {res} {RESET}")
-                    if res["type"] == "file":
-                        if res["name"] not in files:
-                            files[res["name"]] = {}
-                        # files[res["name"]]["url"] = res["url"]
-                        files[res["name"]]["download_url"] = res["download_url"]
-
-                        # truncate the file name from path
-                        file_path = "/".join(res["path"].split("/")[:-1])
-                        files[res["name"]]["path"] = file_path
-
-                    else:
-                        # if response is a list of dict of files
-                        # loop over single content in responses
+                    if type(res) is list:
                         for content in res:
-                            print(f"{BRIGHT_RED} {content} {RESET}")
+                            # print(f"{BRIGHT_RED} {content} {RESET}")
                             # fetch files and directories
                             if content["type"] == "file":
                                 if content["name"] not in files:
@@ -206,6 +195,16 @@ async def get_repository_content(
                                 # if the content is dir then create a new requests
                                 # to fetch files inside it
                                 repo_urls.append(content["url"])
+                    else:
+                        if res["name"] not in files:
+                            files[res["name"]] = {}
+                        # files[res["name"]]["url"] = res["url"]
+                        files[res["name"]]["download_url"] = res["download_url"]
+
+                        # truncate the file name from path
+                        file_path = "/".join(res["path"].split("/")[:-1])
+                        files[res["name"]]["path"] = file_path
+
             response.clear()
         print()
 
@@ -365,11 +364,13 @@ async def main() -> None:
     print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
     print(BRIGHT_YELLOW + repo["owner"] + RESET)
 
-    print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
-    print(BRIGHT_YELLOW + repo["branch"] + RESET)
+    if repo["branch"]:
+        print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
+        print(BRIGHT_YELLOW + repo["branch"] + RESET)
 
-    print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
-    print(BRIGHT_YELLOW + repo["path"] + RESET)
+    if repo["path"]:
+        print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
+        print(BRIGHT_YELLOW + repo["path"] + RESET)
     print()
 
     # # fetch repository content
