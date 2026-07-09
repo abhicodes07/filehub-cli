@@ -27,6 +27,8 @@
 - [ ] consider using Git Trees API with `recursive=1` parameter, to fetch the entire repository tree in a single request
 
 - [ ] lazy browsing, instead of making 1000s of calls for each directory, let user the choose the directory and then make the call
+- [ ] `-r` flag to download the repository README file
+- [ ] create a flag to let user check their rate limit maybe `--rate-limit`
 
 > [!ERROR] ERROR [fixed]
 > handle the only file url error
