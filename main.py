@@ -1,16 +1,23 @@
+import argparse
 import asyncio
 import os
 import subprocess
 import time
-import argparse
 from datetime import datetime
-from subprocess import CalledProcessError
 from pathlib import Path
+from subprocess import CalledProcessError
 from typing import Any
 from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+)
 
 # terminal colors
 RESET = "\033[0m"  # called to return to standard terminal text color
@@ -195,6 +202,7 @@ async def get_repository_content(
                                 ]
                                 file_path = "/".join(content["path"].split("/")[:-1])
                                 files[content["name"]]["path"] = file_path
+                                files[content["name"]]["size"] = content["size"]
                             else:
                                 # if the content is dir then create a new requests
                                 # to fetch files from it
@@ -204,6 +212,7 @@ async def get_repository_content(
                             files[res["name"]] = {}
                         # files[res["name"]]["url"] = res["url"]
                         files[res["name"]]["download_url"] = res["download_url"]
+                        files[res["name"]]["size"] = res["size"]
 
                         # truncate the file name from path
                         file_path = "/".join(res["path"].split("/")[:-1])
@@ -252,7 +261,7 @@ def select_files(files: dict | None = None) -> dict | None:
         )
     except CalledProcessError:
         print("No file selected, Aborting!")
-        return
+        raise
 
     selected_files = result.stdout.split("\n")[:-1]
     selected_file_urls = {}
@@ -264,6 +273,7 @@ def select_files(files: dict | None = None) -> dict | None:
         if selected not in selected_file_urls:
             selected_file_urls[selected] = {}
         selected_file_urls[selected]["download_url"] = files[selected]["download_url"]
+        selected_file_urls[selected]["size"] = files[selected]["size"]
         selected_file_urls[selected]["path"] = files[selected]["path"]
     print()
 
@@ -273,9 +283,11 @@ def select_files(files: dict | None = None) -> dict | None:
 async def download_single_file(
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
+    progress: Progress,
     file_name: str,
     download_url: str,
     path: str,
+    size: int,
     index: int,
 ) -> Path:
     if FLATTEN:
@@ -289,20 +301,27 @@ async def download_single_file(
         print(f"{BRIGHT_YELLOW}{file_name}{RESET} already exists!\n")
     else:
         async with semaphore:
-            print(f"{BRIGHT_GREEN}[{index + 1}] Downloading {file_name} ...{RESET}")
+            # print(f"{BRIGHT_GREEN}[{index + 1}] Downloading {file_name} ...{RESET}")
+            task = progress.add_task("", total=size, filename=file_name)
             ts = int(time.time())
             url = f"{download_url}?ts={ts}"
 
-            response = await client.get(url, timeout=10, follow_redirects=True)
-            response.raise_for_status()
+            # response = await client.get(url, timeout=10, follow_redirects=True)
+            async with client.stream("GET", url, follow_redirects=True) as response:
+                response.raise_for_status()
 
-            async with aiofiles.open(download_path, "wb") as f:
-                async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
-                    if chunk:
-                        await f.write(chunk)
+                async with aiofiles.open(download_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
+                        if chunk:
+                            await f.write(chunk)
+                            progress.update(task, advance=len(chunk))
 
-            print(
-                f"{BRIGHT_GREEN}[*]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}"
+            # print(
+            #     f"{BRIGHT_GREEN}[*]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}"
+            # )
+            progress.update(task, visible=False)
+            progress.console.print(
+                f"[green]Downloaded[/green] {file_name} and saved to [italic][yellow]{download_path}[/yellow][/italic]"
             )
 
     return download_path
@@ -312,24 +331,35 @@ async def download_files(files: dict[str, dict] | None = None) -> list[Path] | N
     if not files:
         return
 
+    progress = Progress(
+        TextColumn("[bold blue]Downloading {task.fields[filename]}"),
+        SpinnerColumn("simpleDots"),
+        BarColumn(),
+        "{task.percentage:>.0f}%",
+        DownloadColumn(),
+    )
+
     # NOTE: LIMIT PROCESSES SPAWN LIMIT IN CPU IN CASE THERE ARE THOUSANDS OF REQUESTS
     dl_semaphore = asyncio.Semaphore(DOWNLOAD_LIMIT)
-    async with httpx.AsyncClient() as client:
-        async with asyncio.TaskGroup() as tg:
-            tasks = [
-                tg.create_task(
-                    download_single_file(
-                        client,
-                        dl_semaphore,
-                        file,
-                        files[file]["download_url"],
-                        files[file]["path"],
-                        i,
+    with progress:
+        async with httpx.AsyncClient() as client:
+            async with asyncio.TaskGroup() as tg:
+                tasks = [
+                    tg.create_task(
+                        download_single_file(
+                            client,
+                            dl_semaphore,
+                            progress,
+                            file,
+                            files[file]["download_url"],
+                            files[file]["path"],
+                            files[file]["size"],
+                            i,
+                        )
                     )
-                )
-                for i, file in enumerate(files)
-            ]
-        file_paths = [task.result() for task in tasks]
+                    for i, file in enumerate(files)
+                ]
+            file_paths = [task.result() for task in tasks]
 
     return file_paths
 
