@@ -3,7 +3,7 @@ import asyncio
 import os
 import subprocess
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any
@@ -36,6 +36,8 @@ CPU_WORKERS = os.cpu_count()
 # flags
 BRANCH = False
 FLATTEN = False
+URL = False
+RATE_LIMIT = False
 
 
 class BranchNotFoundError(Exception):
@@ -51,11 +53,22 @@ class BranchNotFoundError(Exception):
         super().__init__(message)
 
 
+class GithubRateLimitError(Exception):
+    """Raised when the Github API rate limit is exceeded."""
+
+    def __init__(self, used: int, reset_time: str) -> None:
+        self.reset_time = reset_time
+        self.used = used
+        message = f"You have exhausted the Github API rate limit.\nUsed: {BRIGHT_YELLOW}{used}{RESET}\nTry again in {BRIGHT_YELLOW}{self.reset_time}{RESET}"
+        super().__init__(message)
+
+
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="A simple CLI program to download specific files from Github repositories."
     )
 
+    parser.add_argument("url", type=str, help="Required Github repository URL.")
     parser.add_argument(
         "-b",
         "--branch",
@@ -69,17 +82,12 @@ def get_arguments() -> argparse.Namespace:
         action="store_true",
         help="Flatten the directory structure.\nBy default, directory structure of the file is preserved according to it's path on the repository.",
     )
-    parser.add_argument("url", type=str, help="Required Github repository URL.")
     parser.add_argument("-p", "--path", help="Download path of the file.")
+    parser.add_argument(
+        "--rate-limit", action="store_true", help="Check Github API rate limit uses."
+    )
 
     args = parser.parse_args()
-    repo_url = urlsplit(args.url)
-
-    if repo_url.scheme not in ("http", "https"):
-        parser.error("URL must start with http:// or https://")
-
-    if repo_url.netloc != "github.com":
-        parser.error(f"{BRIGHT_RED}{args.url}{RESET} is not a valid Github URL!")
 
     if args.branch:
         global BRANCH
@@ -87,7 +95,18 @@ def get_arguments() -> argparse.Namespace:
 
     if args.flatten:
         global FLATTEN
-        FLATTEN = True
+        FLATTEN = args.flatten
+
+    if args.rate_limit:
+        global RATE_LIMIT
+        RATE_LIMIT = args.rate_limit
+
+    repo_url = urlsplit(args.url)
+    if repo_url.scheme not in ("http", "https"):
+        parser.error("URL must start with http:// or https://")
+
+    if repo_url.netloc != "github.com":
+        parser.error(f"{BRIGHT_RED}{args.url}{RESET} is not a valid Github URL!")
 
     return args
 
@@ -142,22 +161,29 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
     return info
 
 
-def check_api_request_limit() -> dict[str, Any]:
+def check_user_rate_limit() -> None:
     response = httpx.get("https://api.github.com/rate_limit").json()
     rate_remaining = response["rate"]["remaining"]
     rate_used = response["rate"]["used"]
     reset_time = datetime.fromtimestamp(response["rate"]["reset"])
-    used_all = False
 
-    if rate_remaining == 0 or rate_used == 60:
-        used_all = True
+    print(
+        f"\n{BRIGHT_YELLOW}[!]{RESET} Github API Remaining Rates: {BRIGHT_YELLOW}{rate_remaining}{RESET}"
+    )
+    print(
+        f"{BRIGHT_YELLOW}[!]{RESET} Github API Used Rates: {BRIGHT_YELLOW}{rate_used}{RESET}"
+    )
+    print(f"{BRIGHT_YELLOW}[!]{RESET} Reset: {BRIGHT_YELLOW}{str(reset_time)}{RESET}")
 
-    return {
-        "rate_remaining": rate_remaining,
-        "rate_used": rate_used,
-        "used_all": used_all,
-        "reset_time": str(reset_time),
-    }
+
+def check_api_rate_limit(headers: httpx.Headers) -> None:
+    rate_limit_remaining = int(headers["x-ratelimit-remaining"])
+    rate_limit_used = int(headers["x-ratelimit-used"])
+    rate_limit_reset = int(headers["x-ratelimit-reset"])
+    reset_time = str(datetime.fromtimestamp(rate_limit_reset))
+
+    if rate_limit_remaining == 0 or rate_limit_used == 60:
+        raise GithubRateLimitError(rate_limit_used, reset_time)
 
 
 async def get_repository_content(
@@ -179,9 +205,13 @@ async def get_repository_content(
         for i, req in enumerate(repo_urls):
             # print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
             # print(BRIGHT_YELLOW + req + RESET)
-            #
+
             res = await client.get(req)
             res.raise_for_status()
+
+            headers = res.headers
+            check_api_rate_limit(headers)
+
             response.append(res.json())
             # print(f"{BRIGHT_GREEN} {response} {RESET}")
 
@@ -319,10 +349,11 @@ async def download_single_file(
             # print(
             #     f"{BRIGHT_GREEN}[*]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}"
             # )
-            progress.update(task, visible=False)
-            progress.console.print(
-                f"[green]Downloaded[/green] {file_name} and saved to [italic][yellow]{download_path}[/yellow][/italic]"
-            )
+
+        progress.update(task, visible=False)
+        progress.console.print(
+            f"[green]Downloaded[/green] {file_name} and saved to [italic][yellow]{download_path}[/yellow][/italic]"
+        )
 
     return download_path
 
@@ -335,7 +366,8 @@ async def download_files(files: dict[str, dict] | None = None) -> list[Path] | N
         TextColumn("[bold blue]Downloading {task.fields[filename]}"),
         SpinnerColumn("simpleDots"),
         BarColumn(),
-        "{task.percentage:>.0f}%",
+        "[ {task.percentage:>3.1f}% ]",
+        " | ",
         DownloadColumn(),
     )
 
@@ -388,13 +420,6 @@ async def main() -> None:
     args = get_arguments()
     repo = parse_repo_url(args)
 
-    api_status = check_api_request_limit()
-    if api_status["used_all"]:
-        print(BRIGHT_RED + "Github API rate limit reached!" + RESET)
-        print(BRIGHT_RED + "Try again in: " + RESET, end="")
-        print(BRIGHT_YELLOW + api_status["reset_time"] + RESET)
-        return
-
     print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
     print(BRIGHT_YELLOW + repo["repository"] + RESET)
 
@@ -425,14 +450,8 @@ async def main() -> None:
 
     file_paths = await download_files(selected_files)
 
-    api_status = check_api_request_limit()
-    if not api_status["used_all"]:
-        print(
-            f"\n{BRIGHT_YELLOW}[!]{RESET} Github API Remaining Rates: {BRIGHT_YELLOW}{api_status['rate_remaining']}{RESET}"
-        )
-        print(
-            f"{BRIGHT_YELLOW}[!]{RESET} Github API Used Rates: {BRIGHT_YELLOW}{api_status['rate_used']}{RESET}"
-        )
+    if RATE_LIMIT:
+        check_user_rate_limit()
 
 
 if __name__ == "__main__":
