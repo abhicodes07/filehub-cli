@@ -23,6 +23,10 @@
 - [ ] add option such as `-z` or `--zip` to download the zip archive of the repository.
 
 - [ ] if fzf is not installed then we can make optional using `--fzf` and ask users to provide the file names manually on input?
+- [ ] use API response headers `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` to check the rate-limit instead of making requests on `rate-limi/` endpoint at every start and end of the program.
+- [ ] consider using Git Trees API with `recursive=1` parameter, to fetch the entire repository tree in a single request
+
+- [ ] lazy browsing, instead of making 1000s of calls for each directory, let user the choose the directory and then make the call
 
 > [!ERROR] ERROR [fixed]
 > handle the only file url error
