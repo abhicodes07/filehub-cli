@@ -1,12 +1,12 @@
 import argparse
 import asyncio
 import os
+import sys
 import subprocess
 import time
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Any
 from urllib.parse import urlsplit
 
 import aiofiles
@@ -68,23 +68,47 @@ def get_arguments() -> argparse.Namespace:
         description="A simple CLI program to download specific files from Github repositories."
     )
 
-    parser.add_argument("url", type=str, help="Required Github repository URL.")
+    # positional argument
+    parser.add_argument(
+        "url",
+        type=str,
+        metavar="URL",
+        help="Required Github repository URL to download from.",
+    )
+
+    # optional arguments
+    parser.add_argument("-p", "--path", help="Download path of the file.")
     parser.add_argument(
         "-b",
         "--branch",
         nargs="?",
         default=None,
-        help="Specify repository branch.",
+        metavar="BRANCH",
+        help="Branch of the repository to download from.",
     )
     parser.add_argument(
         "-f",
         "--flatten",
         action="store_true",
-        help="Flatten the directory structure.\nBy default, directory structure of the file is preserved according to it's path on the repository.",
+        help="Flatten directory structure.",
     )
-    parser.add_argument("-p", "--path", help="Download path of the file.")
     parser.add_argument(
-        "--rate-limit", action="store_true", help="Check Github API rate limit uses."
+        "-z",
+        "--zip",
+        action="store_true",
+        help="Download zip archive of a repository.",
+    )
+    parser.add_argument(
+        "-r",
+        "--rate-limit",
+        action="store_true",
+        help="Check Github API rate limit uses.",
+    )
+    parser.add_argument(
+        "-t", "--timing", action="store_true", help="Display run-time of the program."
+    )
+    parser.add_argument(
+        "-d", "--dir", action="store_true", help="Download complete directory."
     )
 
     args = parser.parse_args()
@@ -101,36 +125,51 @@ def get_arguments() -> argparse.Namespace:
         global RATE_LIMIT
         RATE_LIMIT = args.rate_limit
 
-    repo_url = urlsplit(args.url)
-    if repo_url.scheme not in ("http", "https"):
-        parser.error("URL must start with http:// or https://")
-
-    if repo_url.netloc != "github.com":
-        parser.error(f"{BRIGHT_RED}{args.url}{RESET} is not a valid Github URL!")
-
     return args
 
 
-def check_branch_status(owner: str, repo: str, branch: str) -> bool:
+def validate_url(url: str):
+    segments = urlsplit(url)
+
+    if segments.netloc not in ("github.com", "gist.github.com"):
+        raise ValueError(f"{url} is not a valid Github URL!")
+
+    if segments.scheme not in ("https", "http"):
+        raise ValueError("URL must start with http:// or https://")
+
+
+def validate_branch(owner: str, repo: str, branch: str) -> bool:
     # verify the existence of the branch if provided as an argument.
     branch_url = f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}"
 
     res = httpx.get(branch_url)
-    if res.status_code == 200:
-        return True
+    if res.status_code != 200:
+        return False
 
-    return False
+    return True
 
 
 def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
     info = {}
 
-    url = urlsplit(cmd_args.url)
-    segments = url.path.strip("/").split("/")
-    # print(segments)
+    validate_url(cmd_args.url)
 
-    info["owner"] = segments[0]
-    info["repository"] = segments[1]
+    url = urlsplit(cmd_args.url)
+    path_segments = url.path.strip("/").split("/")
+
+    if len(path_segments) < 2:
+        match url.netloc:
+            case "github.com":
+                raise ValueError(
+                    "Invalid URL: https://github.com/owner/repository is expected."
+                )
+            case "gist.github.com":
+                raise ValueError(
+                    "Invalid URL: https://gist.github.com/owner/gistid is expected."
+                )
+
+    info["owner"] = path_segments[0]
+    info["repository"] = path_segments[1]
     info["branch"] = ""
     info["path"] = ""
 
@@ -138,24 +177,24 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
     # and user provides a different branch
     # as an argument then ignore the branch flag
     global BRANCH
-    if "tree" in segments or "blob" in segments and BRANCH:
+    if "tree" in path_segments or "blob" in path_segments and BRANCH:
         BRANCH = False
 
     # if branch is provided as an argument
     if BRANCH:
         # verify the existence of user provided branch
-        if not check_branch_status(info["owner"], info["repository"], cmd_args.branch):
+        if not validate_branch(info["owner"], info["repository"], cmd_args.branch):
             raise BranchNotFoundError(cmd_args.branch, info["repository"])
 
         info["branch"] = cmd_args.branch
     else:
         # find branch in url
-        if len(segments) > 2:
-            for i in range(1, len(segments)):
-                branch_name = "/".join(segments[3:][:i])
-                if check_branch_status(info["owner"], info["repository"], branch_name):
+        if len(path_segments) > 2:
+            for i in range(1, len(path_segments)):
+                branch_name = "/".join(path_segments[3:][:i])
+                if validate_branch(info["owner"], info["repository"], branch_name):
                     info["branch"] = branch_name
-                    info["path"] = "/".join(segments[3:][i:])
+                    info["path"] = "/".join(path_segments[3:][i:])
                     break
     # print(info)
     return info
