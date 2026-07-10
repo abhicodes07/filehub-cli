@@ -23,12 +23,15 @@
 - [ ] add option such as `-z` or `--zip` to download the zip archive of the repository.
 
 - [ ] if fzf is not installed then we can make optional using `--fzf` and ask users to provide the file names manually on input?
-- [ ] use API response headers `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` to check the rate-limit instead of making requests on `rate-limi/` endpoint at every start and end of the program.
+- [x] use API response headers `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` to check the rate-limit instead of making requests on `rate-limi/` endpoint at every start and end of the program.
 - [ ] consider using Git Trees API with `recursive=1` parameter, to fetch the entire repository tree in a single request
 
 - [ ] lazy browsing, instead of making 1000s of calls for each directory, let user the choose the directory and then make the call
-- [ ] `-r` flag to download the repository README file
 - [ ] create a flag to let user check their rate limit maybe `--rate-limit`
+- [ ] select files using fzf
+
+- [ ] download from gist
+- [ ] download complete directory
 
 > [!ERROR] ERROR [fixed]
 > handle the only file url error
@@ -62,3 +65,5 @@ To avoid this, use `--use-auth` option to always use authenticated requests.
 - [argparsing](https://gist.github.com/abalter/605773b34a68bb370bf84007ee55a130)
 
 - [selectable interface, maybe](https://github.com/dmartinezm/cli_table_scroll/tree/master)
+
+- [custom argparse help](https://gist.github.com/fonic/fe6cade2e1b9eaf3401cc732f48aeebd)
