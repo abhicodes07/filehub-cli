@@ -27,11 +27,11 @@
 - [ ] consider using Git Trees API with `recursive=1` parameter, to fetch the entire repository tree in a single request
 
 - [ ] lazy browsing, instead of making 1000s of calls for each directory, let user the choose the directory and then make the call
-- [ ] create a flag to let user check their rate limit maybe `--rate-limit`
+- [x] create a flag to let user check their rate limit maybe `--rate-limit`
 - [ ] select files using fzf
 
 - [ ] download from gist
-- [ ] download complete directory
+- [x] download complete directory
 
 > [!ERROR] ERROR [fixed]
 > handle the only file url error
