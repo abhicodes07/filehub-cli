@@ -36,7 +36,6 @@ CPU_WORKERS = os.cpu_count()
 # flags
 BRANCH = False
 FLATTEN = False
-URL = False
 RATE_LIMIT = False
 
 
@@ -190,12 +189,19 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
     else:
         # find branch in url
         if len(path_segments) > 2:
-            for i in range(1, len(path_segments)):
-                branch_name = "/".join(path_segments[3:][:i])
-                if validate_branch(info["owner"], info["repository"], branch_name):
-                    info["branch"] = branch_name
-                    info["path"] = "/".join(path_segments[3:][i:])
-                    break
+            if "blob" not in path_segments or "tree" not in path_segments:
+                # NOTE: IN SOME CASES BRANCH NAME MAY LOOK LIKE PATH SUCH AS feat/something
+                # SO TO IDENTIFY RIGHT BRANCH, CONSTRUCT AND VALIDATE BRANCH BY ITERATING
+                # OVER PATH
+                for i in range(1, len(path_segments)):
+                    branch_name = "/".join(path_segments[3:][:i])
+                    if validate_branch(info["owner"], info["repository"], branch_name):
+                        info["branch"] = branch_name
+                        # rest of the path after branch
+                        info["path"] = "/".join(path_segments[3:][i:])
+                        break
+            else:
+                raise ValueError(f"Invalid URL: {cmd_args.url} is not a valid URL.")
     # print(info)
     return info
 
@@ -258,7 +264,7 @@ async def get_repository_content(
                 # loop over the list of responses
                 for res in response:
                     # print(f"{BRIGHT_YELLOW} {res} {RESET}")
-                    if type(res) is list:
+                    if isinstance(res, list):
                         for content in res:
                             # print(f"{BRIGHT_RED} {content} {RESET}")
                             # fetch files and directories
@@ -288,8 +294,6 @@ async def get_repository_content(
                         files[res["name"]]["path"] = file_path
 
             response.clear()
-        print()
-
     return files
 
 
@@ -475,12 +479,12 @@ async def main() -> None:
     print()
 
     # # fetch repository content
-    repo_content = await get_repository_content(
+    files = await get_repository_content(
         repo["owner"], repo["repository"], repo["branch"], repo["path"]
     )
 
     # select files
-    selected_files = select_files(repo_content)
+    selected_files = select_files(files)
 
     # download selected files
     global DOWNLOAD_DIR
