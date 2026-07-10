@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import os
-import sys
 import subprocess
 import time
 from datetime import datetime
@@ -36,7 +35,7 @@ CPU_WORKERS = os.cpu_count()
 # flags
 BRANCH = False
 FLATTEN = False
-RATE_LIMIT = False
+DIR = False
 
 
 class BranchNotFoundError(Exception):
@@ -111,19 +110,6 @@ def get_arguments() -> argparse.Namespace:
     )
 
     args = parser.parse_args()
-
-    if args.branch:
-        global BRANCH
-        BRANCH = True
-
-    if args.flatten:
-        global FLATTEN
-        FLATTEN = args.flatten
-
-    if args.rate_limit:
-        global RATE_LIMIT
-        RATE_LIMIT = args.rate_limit
-
     return args
 
 
@@ -301,7 +287,7 @@ def select_files(files: dict | None = None) -> dict | None:
     if not files:
         return
 
-    if len(files) < 2:
+    if len(files) < 2 or DIR:
         return files
 
     file_names = list(files.keys())
@@ -461,40 +447,57 @@ def timing(start, fetch, download, finish):
 
 async def main() -> None:
     args = get_arguments()
-    repo = parse_repo_url(args)
 
-    print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
-    print(BRIGHT_YELLOW + repo["repository"] + RESET)
+    global DIR, BRANCH, FLATTEN
 
-    print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
-    print(BRIGHT_YELLOW + repo["owner"] + RESET)
+    if args.branch:
+        BRANCH = True
 
-    if repo["branch"]:
-        print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
-        print(BRIGHT_YELLOW + repo["branch"] + RESET)
+    if args.flatten:
+        FLATTEN = args.flatten
 
-    if repo["path"]:
-        print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
-        print(BRIGHT_YELLOW + repo["path"] + RESET)
-    print()
+    if args.dir:
+        DIR = args.dir
 
-    # # fetch repository content
-    files = await get_repository_content(
-        repo["owner"], repo["repository"], repo["branch"], repo["path"]
-    )
+    try:
+        repo = parse_repo_url(args)
 
-    # select files
-    selected_files = select_files(files)
+        print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
+        print(BRIGHT_YELLOW + repo["repository"] + RESET)
 
-    # download selected files
-    global DOWNLOAD_DIR
-    DOWNLOAD_DIR = Path(repo["repository"])
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
+        print(BRIGHT_YELLOW + repo["owner"] + RESET)
 
-    file_paths = await download_files(selected_files)
+        if repo["branch"]:
+            print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
+            print(BRIGHT_YELLOW + repo["branch"] + RESET)
 
-    if RATE_LIMIT:
-        check_user_rate_limit()
+        if repo["path"]:
+            print(f"{BRIGHT_GREEN}[+]{RESET} Path: ", end="")
+            print(BRIGHT_YELLOW + repo["path"] + RESET)
+        print()
+
+        # # fetch repository content
+        files = await get_repository_content(
+            repo["owner"], repo["repository"], repo["branch"], repo["path"]
+        )
+
+        # select files
+        selected_files = select_files(files)
+
+        # download selected files
+        global DOWNLOAD_DIR
+        DOWNLOAD_DIR = Path(repo["repository"])
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+        file_paths = await download_files(selected_files)
+
+        if args.rate_limit:
+            check_user_rate_limit()
+
+    except Exception as e:
+        print(f"{e}")
+        raise
 
 
 if __name__ == "__main__":
