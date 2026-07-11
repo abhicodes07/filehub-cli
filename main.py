@@ -3,6 +3,7 @@ import asyncio
 import os
 import subprocess
 import time
+import sys
 from datetime import datetime
 from pathlib import Path
 from subprocess import CalledProcessError
@@ -10,13 +11,6 @@ from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-)
 
 # terminal colors
 RESET = "\033[0m"  # called to return to standard terminal text color
@@ -219,7 +213,7 @@ def check_api_rate_limit(headers: httpx.Headers) -> None:
 
 async def get_repository_content(
     owner: str, name: str, branch: str, path: str | None = None
-) -> dict:
+) -> list[dict]:
     print("Fetching repository contents...\n")
 
     # f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref='{branch}'",
@@ -230,12 +224,12 @@ async def get_repository_content(
     ]
 
     response = []
-    files = {}
+    files = []
 
     async with httpx.AsyncClient() as client:
         for i, req in enumerate(repo_urls):
-            # print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
-            # print(BRIGHT_YELLOW + req + RESET)
+            print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
+            print(BRIGHT_YELLOW + req + RESET)
 
             res = await client.get(req)
             res.raise_for_status()
@@ -243,54 +237,38 @@ async def get_repository_content(
             headers = res.headers
             check_api_rate_limit(headers)
 
-            response.append(res.json())
+            # response is a dict if it's single file
+            # else it is a list of dicts of multiple files
+            if isinstance(res.json(), dict):
+                response.append(res.json())
+            else:
+                response = res.json()
             # print(f"{BRIGHT_GREEN} {response} {RESET}")
 
             if response:
-                # loop over the list of responses
+                # sort files and directories
                 for res in response:
                     # print(f"{BRIGHT_YELLOW} {res} {RESET}")
-                    if isinstance(res, list):
-                        for content in res:
-                            # print(f"{BRIGHT_RED} {content} {RESET}")
-                            # fetch files and directories
-                            if content["type"] == "file":
-                                if content["name"] not in files:
-                                    files[content["name"]] = {}
-                                # files[content["name"]]["url"] = content["url"]
-                                files[content["name"]]["download_url"] = content[
-                                    "download_url"
-                                ]
-                                file_path = "/".join(content["path"].split("/")[:-1])
-                                files[content["name"]]["path"] = file_path
-                                files[content["name"]]["size"] = content["size"]
-                            else:
-                                # if the content is dir then create a new requests
-                                # to fetch files from it
-                                repo_urls.append(content["url"])
+                    if res["type"] == "file":
+                        # remove the filename from the path
+                        res["path"] = "/".join(res["path"].split("/")[:-1])
+                        files.append(res)
                     else:
-                        if res["name"] not in files:
-                            files[res["name"]] = {}
-                        # files[res["name"]]["url"] = res["url"]
-                        files[res["name"]]["download_url"] = res["download_url"]
-                        files[res["name"]]["size"] = res["size"]
-
-                        # truncate the file name from path
-                        file_path = "/".join(res["path"].split("/")[:-1])
-                        files[res["name"]]["path"] = file_path
+                        repo_urls.append(res["url"])
 
             response.clear()
     return files
 
 
-def select_files(files: dict | None = None) -> dict | None:
+def select_files(files: list[dict] | None = None) -> list[dict] | None:
     if not files:
         return
 
     if len(files) < 2 or DIR:
         return files
 
-    file_names = list(files.keys())
+    # get aall the file names
+    file_names = [file["name"] for file in files]
     file_input = "\n".join(file_names)
 
     try:
@@ -323,49 +301,43 @@ def select_files(files: dict | None = None) -> dict | None:
         raise
 
     selected_files = result.stdout.split("\n")[:-1]
-    selected_file_urls = {}
+    selected = []
 
     print(f"{BRIGHT_GREEN}[+]{RESET} SELECTED FILES:\n")
 
-    for i, selected in enumerate(selected_files, start=1):
-        print(f"\t{BRIGHT_GREEN}[{i}]{RESET} {selected}")
-        if selected not in selected_file_urls:
-            selected_file_urls[selected] = {}
-        selected_file_urls[selected]["download_url"] = files[selected]["download_url"]
-        selected_file_urls[selected]["size"] = files[selected]["size"]
-        selected_file_urls[selected]["path"] = files[selected]["path"]
+    for idx, file in enumerate(files):
+        if file["name"] in selected_files:
+            print(f"\t{BRIGHT_GREEN}[{idx}]{RESET} {file['name']}")
+            selected.append(file)
     print()
 
-    return selected_file_urls
+    return selected
 
 
 async def download_single_file(
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
-    progress: Progress,
-    file_name: str,
-    download_url: str,
-    path: str,
-    size: int,
-    index: int,
+    file: dict,
 ) -> Path:
+    path = file["path"]
+
     if FLATTEN:
         path = ""
 
     file_path = Path(DOWNLOAD_DIR / path)
     file_path.mkdir(parents=True, exist_ok=True)
-    download_path = file_path / file_name
+    download_path = file_path / file["name"]
 
     if download_path.exists():
-        print(f"{BRIGHT_YELLOW}{file_name}{RESET} already exists!\n")
+        print(f"{BRIGHT_YELLOW}{file['name']}{RESET} already exists!\n")
     else:
+        print(
+            f"{BRIGHT_YELLOW}[!]{RESET} Downloading {BRIGHT_YELLOW}{file['name']}{RESET}"
+        )
         async with semaphore:
-            # print(f"{BRIGHT_GREEN}[{index + 1}] Downloading {file_name} ...{RESET}")
-            task = progress.add_task("", total=size, filename=file_name)
             ts = int(time.time())
-            url = f"{download_url}?ts={ts}"
+            url = f"{file['download_url']}?ts={ts}"
 
-            # response = await client.get(url, timeout=10, follow_redirects=True)
             async with client.stream("GET", url, follow_redirects=True) as response:
                 response.raise_for_status()
 
@@ -373,55 +345,30 @@ async def download_single_file(
                     async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
                         if chunk:
                             await f.write(chunk)
-                            progress.update(task, advance=len(chunk))
-
-            # print(
-            #     f"{BRIGHT_GREEN}[*]{RESET} Downloaded {BRIGHT_GREEN}{file_name}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}"
-            # )
-
-        progress.update(task, visible=False)
-        progress.console.print(
-            f"[green]Downloaded[/green] {file_name} and saved to [italic][yellow]{download_path}[/yellow][/italic]"
+        print(
+            f"{BRIGHT_GREEN}[*]{RESET} Downloaded {BRIGHT_GREEN}{file['name']}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}"
         )
-
     return download_path
 
 
-async def download_files(files: dict[str, dict] | None = None) -> list[Path] | None:
-    if not files:
-        return
-
-    progress = Progress(
-        TextColumn("[bold blue]Downloading {task.fields[filename]}"),
-        SpinnerColumn("simpleDots"),
-        BarColumn(),
-        "[ {task.percentage:>3.1f}% ]",
-        " | ",
-        DownloadColumn(),
-    )
-
+async def download_files(files: list[dict]) -> list[Path]:
     # NOTE: LIMIT PROCESSES SPAWN LIMIT IN CPU IN CASE THERE ARE THOUSANDS OF REQUESTS
     dl_semaphore = asyncio.Semaphore(DOWNLOAD_LIMIT)
-    with progress:
-        async with httpx.AsyncClient() as client:
-            async with asyncio.TaskGroup() as tg:
-                tasks = [
+    async with httpx.AsyncClient() as client:
+        async with asyncio.TaskGroup() as tg:
+            tasks = []
+            for file in files:
+                tasks.append(
                     tg.create_task(
                         download_single_file(
                             client,
                             dl_semaphore,
-                            progress,
                             file,
-                            files[file]["download_url"],
-                            files[file]["path"],
-                            files[file]["size"],
-                            i,
                         )
                     )
-                    for i, file in enumerate(files)
-                ]
-            file_paths = [task.result() for task in tasks]
+                )
 
+        file_paths = [task.result() for task in tasks]
     return file_paths
 
 
