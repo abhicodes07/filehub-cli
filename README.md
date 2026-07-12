@@ -20,7 +20,7 @@
 - [x] check if branch exits or not
 - [x] add flag such as `--preserve-path` or `--flaten` for whether to preserve the directory structure or keep it concise
 - [ ] set CPU limit flag `-c` or `--cpu` to let users specifiy the number of files to be downloaded at a time.
-- [ ] add option such as `-z` or `--zip` to download the zip archive of the repository.
+- [x] add option such as `-z` or `--zip` to download the zip archive of the repository.
 
 - [ ] if fzf is not installed then we can make optional using `--fzf` and ask users to provide the file names manually on input?
 - [x] use API response headers `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` to check the rate-limit instead of making requests on `rate-limi/` endpoint at every start and end of the program.
