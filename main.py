@@ -10,15 +10,16 @@ from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
-import rich
 from rich.progress import (
     BarColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TextColumn,
     TimeElapsedColumn,
     DownloadColumn,
     TransferSpeedColumn,
+    TimeRemainingColumn,
 )
 
 # terminal colors
@@ -48,7 +49,15 @@ fetch_progress = Progress(
 )
 
 download_progress = Progress(
-    TimeElapsedColumn(), BarColumn(), DownloadColumn(), TransferSpeedColumn()
+    TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
+    BarColumn(bar_width=None),
+    "[progress.percentage]{task.percentage:>3.1f}%",
+    "•",
+    DownloadColumn(),
+    "•",
+    TransferSpeedColumn(),
+    "•",
+    TimeRemainingColumn(),
 )
 
 
@@ -300,11 +309,12 @@ async def get_repository_content(repo_info: dict) -> list[dict]:
                 description="Fetching repository content"
             )
             async with httpx.AsyncClient() as client:
-                for i, req in enumerate(fetched_urls):
-                    print(
-                        BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end=""
-                    )
-                    print(BRIGHT_YELLOW + req + RESET)
+                for req in fetched_urls:
+                    # print(
+                    #     BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end=""
+                    # )
+                    # print(BRIGHT_YELLOW + req + RESET)
+                    fetch_progress.console.log(f"Fetched URL: [bold yellow]{req}")
 
                     res = await client.get(req)
                     res.raise_for_status()
@@ -331,6 +341,8 @@ async def get_repository_content(repo_info: dict) -> list[dict]:
                     response.clear()
 
             fetch_progress.update(fetch_task, visible=False)
+
+        print(f"\nFetched {BRIGHT_GREEN}{len(files)}{RESET} files.")
     except httpx.HTTPError as exc:
         handle_client_error(exc)
         sys.exit(1)
@@ -381,11 +393,11 @@ def select_files(files: list[dict] | None = None) -> list[dict] | None:
     selected_files = result.stdout.split("\n")[:-1]
     selected = []
 
-    print(f"{BRIGHT_GREEN}[+]{RESET} SELECTED FILES:\n")
+    # print(f"{BRIGHT_GREEN}[+]{RESET} SELECTED FILES:\n")
 
     for idx, file in enumerate(files):
         if file["name"] in selected_files:
-            print(f"\t{BRIGHT_GREEN}[{idx}]{RESET} {file['name']}")
+            # print(f"\t{BRIGHT_GREEN}[{idx}]{RESET} {file['name']}")
             selected.append(file)
     print()
 
@@ -428,13 +440,14 @@ def download_zip(repo_info: dict) -> None:
             print(f"Downloaded {repo_info['repository']} to {path}.")
 
     except httpx.HTTPError as e:
-        print(e)
+        handle_client_error(e)
         sys.exit(1)
 
 
 async def download_single_file(
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
+    taskid: TaskID,
     file: dict,
 ) -> Path:
     path = file["path"]
@@ -449,44 +462,48 @@ async def download_single_file(
     if download_path.exists():
         print(f"{BRIGHT_YELLOW}{file['name']}{RESET} already exists!\n")
     else:
-        print(
-            f"{BRIGHT_YELLOW}[!]{RESET} Downloading {BRIGHT_YELLOW}{file['name']}{RESET}"
-        )
         async with semaphore:
             ts = int(time.time())
             url = f"{file['download_url']}?ts={ts}"
 
             async with client.stream("GET", url, follow_redirects=True) as response:
                 response.raise_for_status()
+                download_progress.update(taskid, total=int(file["size"]))
 
                 async with aiofiles.open(download_path, "wb") as f:
+                    download_progress.start_task(taskid)
+
                     async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
                         if chunk:
                             await f.write(chunk)
-        print(
-            f"{BRIGHT_GREEN}[*]{RESET} Downloaded {BRIGHT_GREEN}{file['name']}{RESET} and saved to {BRIGHT_YELLOW}{download_path}{RESET}"
-        )
+                            download_progress.update(taskid, advance=len(chunk))
     return download_path
 
 
 async def download_files(files: list[dict]) -> list[Path]:
     # NOTE: LIMIT PROCESSES SPAWN LIMIT IN CPU IN CASE THERE ARE THOUSANDS OF REQUESTS
     dl_semaphore = asyncio.Semaphore(DOWNLOAD_LIMIT)
-    async with httpx.AsyncClient() as client:
-        async with asyncio.TaskGroup() as tg:
-            tasks = []
-            for file in files:
-                tasks.append(
-                    tg.create_task(
-                        download_single_file(
-                            client,
-                            dl_semaphore,
-                            file,
+
+    with download_progress:
+        async with httpx.AsyncClient() as client:
+            async with asyncio.TaskGroup() as tg:
+                tasks = []
+                for file in files:
+                    task_id = download_progress.add_task(
+                        "download", filename=file["name"], start=False
+                    )
+                    tasks.append(
+                        tg.create_task(
+                            download_single_file(
+                                client,
+                                dl_semaphore,
+                                task_id,
+                                file,
+                            )
                         )
                     )
-                )
 
-        file_paths = [task.result() for task in tasks]
+            file_paths = [task.result() for task in tasks]
     return file_paths
 
 
