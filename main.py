@@ -7,10 +7,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from subprocess import CalledProcessError
+from typing import Text
 from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 # terminal colors
 RESET = "\033[0m"  # called to return to standard terminal text color
@@ -24,12 +26,17 @@ DOWNLOAD_DIR = Path("Filehub")
 
 # limit download to only 4 cpus
 DOWNLOAD_LIMIT = 4
-CPU_WORKERS = os.cpu_count()
 
 # flags
 BRANCH = False
 FLATTEN = False
 DIR = False
+
+fetch_progress = Progress(
+    TimeElapsedColumn(),
+    TextColumn("[bold green]{task.description}"),
+    SpinnerColumn("dots"),
+)
 
 
 class BranchNotFoundError(Exception):
@@ -42,16 +49,6 @@ class BranchNotFoundError(Exception):
             f"'{self.branch}' Branch does not exist on '{self.repository}' repository."
         )
 
-        super().__init__(message)
-
-
-class GithubRateLimitError(Exception):
-    """Raised when the Github API rate limit is exceeded."""
-
-    def __init__(self, used: int, reset_time: str) -> None:
-        self.reset_time = reset_time
-        self.used = used
-        message = f"You have exhausted the Github API rate limit.\nUsed: {BRIGHT_YELLOW}{used}{RESET}\nTry again in {BRIGHT_YELLOW}{self.reset_time}{RESET}"
         super().__init__(message)
 
 
@@ -201,20 +198,39 @@ def check_user_rate_limit() -> None:
     print(f"{BRIGHT_YELLOW}[!]{RESET} Reset: {BRIGHT_YELLOW}{str(reset_time)}{RESET}")
 
 
-def check_api_rate_limit(headers: httpx.Headers) -> None:
-    rate_limit_remaining = int(headers["x-ratelimit-remaining"])
-    rate_limit_used = int(headers["x-ratelimit-used"])
-    rate_limit_reset = int(headers["x-ratelimit-reset"])
-    reset_time = str(datetime.fromtimestamp(rate_limit_reset))
+def handle_client_error(error: httpx.HTTPError) -> None:
+    if isinstance(error, httpx.ConnectError):
+        print(
+            "\nFailed to establish connection, try:\n- Checking yout network connection."
+        )
 
-    if rate_limit_remaining == 0 or rate_limit_used == 60:
-        raise GithubRateLimitError(rate_limit_used, reset_time)
+    if isinstance(error, httpx.HTTPStatusError):
+        status_code = error.response.status_code
+
+        if status_code == 401:
+            print(
+                "\n Bad Credentials for authentication, please check your username or password (or access token)!"
+            )
+        elif status_code == 403:
+            headers = error.response.headers
+            rate_limit_reset = int(headers["x-ratelimit-reset"])
+            reset_time = datetime.fromtimestamp(rate_limit_reset)
+            print(
+                f"You have exhausted the Github API rate limit.\nTry again in {BRIGHT_YELLOW}{reset_time}{RESET}"
+            )
+        else:
+            error_msg = f"\n{str(error)}"
+            if status_code == 404:
+                error_msg += ", please check the input URL!"
+            print(error_msg)
+    else:
+        print(f"\nError: {str(error)}")
 
 
 async def get_repository_content(
     owner: str, name: str, branch: str, path: str | None = None
 ) -> list[dict]:
-    print("Fetching repository contents...\n")
+    # print("Fetching repository contents...\n")
 
     # f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref='{branch}'",
     repo_urls = [
@@ -226,37 +242,47 @@ async def get_repository_content(
     response = []
     files = []
 
-    async with httpx.AsyncClient() as client:
-        for i, req in enumerate(repo_urls):
-            print(BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end="")
-            print(BRIGHT_YELLOW + req + RESET)
+    try:
+        with fetch_progress:
+            fetch_task = fetch_progress.add_task(
+                description="Fetching repository content"
+            )
+            async with httpx.AsyncClient() as client:
+                for i, req in enumerate(repo_urls):
+                    # print(
+                    #     BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end=""
+                    # )
+                    # print(BRIGHT_YELLOW + req + RESET)
 
-            res = await client.get(req)
-            res.raise_for_status()
+                    res = await client.get(req)
+                    res.raise_for_status()
 
-            headers = res.headers
-            check_api_rate_limit(headers)
-
-            # response is a dict if it's single file
-            # else it is a list of dicts of multiple files
-            if isinstance(res.json(), dict):
-                response.append(res.json())
-            else:
-                response = res.json()
-            # print(f"{BRIGHT_GREEN} {response} {RESET}")
-
-            if response:
-                # sort files and directories
-                for res in response:
-                    # print(f"{BRIGHT_YELLOW} {res} {RESET}")
-                    if res["type"] == "file":
-                        # remove the filename from the path
-                        res["path"] = "/".join(res["path"].split("/")[:-1])
-                        files.append(res)
+                    # response is a dict if it's single file
+                    # else it is a list of dicts of multiple files
+                    if isinstance(res.json(), dict):
+                        response.append(res.json())
                     else:
-                        repo_urls.append(res["url"])
+                        response = res.json()
+                    # print(f"{BRIGHT_GREEN} {response} {RESET}")
 
-            response.clear()
+                    if response:
+                        # sort files and directories
+                        for res in response:
+                            # print(f"{BRIGHT_YELLOW} {res} {RESET}")
+                            if res["type"] == "file":
+                                # remove the filename from the path
+                                res["path"] = "/".join(res["path"].split("/")[:-1])
+                                files.append(res)
+                            else:
+                                repo_urls.append(res["url"])
+
+                    response.clear()
+
+            fetch_progress.update(fetch_task, visible=False)
+    except httpx.HTTPError as exc:
+        handle_client_error(exc)
+        sys.exit(1)
+
     return files
 
 
