@@ -1,18 +1,25 @@
 import argparse
 import asyncio
-import os
 import subprocess
 import time
 import sys
 from datetime import datetime
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Text
 from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+import rich
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    DownloadColumn,
+    TransferSpeedColumn,
+)
 
 # terminal colors
 RESET = "\033[0m"  # called to return to standard terminal text color
@@ -31,11 +38,17 @@ DOWNLOAD_LIMIT = 4
 BRANCH = False
 FLATTEN = False
 DIR = False
+ZIP = False
+
 
 fetch_progress = Progress(
     TimeElapsedColumn(),
     TextColumn("[bold green]{task.description}"),
     SpinnerColumn("dots"),
+)
+
+download_progress = Progress(
+    TimeElapsedColumn(), BarColumn(), DownloadColumn(), TransferSpeedColumn()
 )
 
 
@@ -94,14 +107,31 @@ def get_arguments() -> argparse.Namespace:
         help="Check Github API rate limit uses.",
     )
     parser.add_argument(
-        "-t", "--timing", action="store_true", help="Display run-time of the program."
-    )
-    parser.add_argument(
         "-d", "--dir", action="store_true", help="Download complete directory."
     )
 
     args = parser.parse_args()
     return args
+
+
+def timing(start, fetch, download, finish):
+    fetch_time = fetch - start
+    select_time = download - fetch
+    download_time = finish - download
+    total_time = finish - start
+
+    print(
+        f"\nFetched files in: {BRIGHT_RED}{fetch_time:.2f}{RESET} seconds. {(fetch_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Selected files in: {BRIGHT_RED}{select_time:.2f}{RESET} seconds. {(select_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Downloaded files in: {BRIGHT_RED}{download_time:.2f}{RESET} seconds. {(download_time / total_time) * 100:.2f}% of total time.",
+    )
+    print(
+        f"Total execution time: {BRIGHT_RED}{total_time:.2f}{RESET} seconds. {(total_time / total_time) * 100:.2f}% of total time.",
+    )
 
 
 def validate_url(url: str):
@@ -123,64 +153,6 @@ def validate_branch(owner: str, repo: str, branch: str) -> bool:
         return False
 
     return True
-
-
-def parse_repo_url(cmd_args: argparse.Namespace) -> dict[str, str]:
-    info = {}
-
-    validate_url(cmd_args.url)
-
-    url = urlsplit(cmd_args.url)
-    path_segments = url.path.strip("/").split("/")
-
-    if len(path_segments) < 2:
-        match url.netloc:
-            case "github.com":
-                raise ValueError(
-                    "Invalid URL: https://github.com/owner/repository is expected."
-                )
-            case "gist.github.com":
-                raise ValueError(
-                    "Invalid URL: https://gist.github.com/owner/gistid is expected."
-                )
-
-    info["owner"] = path_segments[0]
-    info["repository"] = path_segments[1]
-    info["branch"] = ""
-    info["path"] = ""
-
-    # if url already consists the branch or has `blob` in it
-    # and user provides a different branch
-    # as an argument then ignore the branch flag
-    global BRANCH
-    if "tree" in path_segments or "blob" in path_segments and BRANCH:
-        BRANCH = False
-
-    # if branch is provided as an argument
-    if BRANCH:
-        # verify the existence of user provided branch
-        if not validate_branch(info["owner"], info["repository"], cmd_args.branch):
-            raise BranchNotFoundError(cmd_args.branch, info["repository"])
-
-        info["branch"] = cmd_args.branch
-    else:
-        # find branch in url
-        if len(path_segments) > 2:
-            if "blob" not in path_segments or "tree" not in path_segments:
-                # NOTE: IN SOME CASES BRANCH NAME MAY LOOK LIKE PATH SUCH AS feat/something
-                # SO TO IDENTIFY RIGHT BRANCH, CONSTRUCT AND VALIDATE BRANCH BY ITERATING
-                # OVER PATH
-                for i in range(1, len(path_segments)):
-                    branch_name = "/".join(path_segments[3:][:i])
-                    if validate_branch(info["owner"], info["repository"], branch_name):
-                        info["branch"] = branch_name
-                        # rest of the path after branch
-                        info["path"] = "/".join(path_segments[3:][i:])
-                        break
-            else:
-                raise ValueError(f"Invalid URL: {cmd_args.url} is not a valid URL.")
-    # print(info)
-    return info
 
 
 def check_user_rate_limit() -> None:
@@ -227,17 +199,97 @@ def handle_client_error(error: httpx.HTTPError) -> None:
         print(f"\nError: {str(error)}")
 
 
-async def get_repository_content(
-    owner: str, name: str, branch: str, path: str | None = None
-) -> list[dict]:
+def parse_repo_url(cmd_args: argparse.Namespace) -> dict:
+    info = {}
+
+    validate_url(cmd_args.url)
+
+    url = urlsplit(cmd_args.url)
+    path_segments = url.path.strip("/").split("/")
+
+    if len(path_segments) < 2:
+        match url.netloc:
+            case "github.com":
+                raise ValueError(
+                    "Invalid URL: https://github.com/owner/repository is expected."
+                )
+            case "gist.github.com":
+                raise ValueError(
+                    "Invalid URL: https://gist.github.com/owner/gistid is expected."
+                )
+
+    info["owner"] = path_segments[0]
+    info["repository"] = path_segments[1]
+    info["branch"] = None
+    info["path"] = None
+
+    # if url already consists the branch or has `blob` in it
+    # and user provides a different branch
+    # as an argument then ignore the branch flag
+    global BRANCH
+    if "tree" in path_segments or "blob" in path_segments and BRANCH:
+        BRANCH = False
+
+    # if branch is provided as an argument
+    if BRANCH:
+        # verify the existence of user provided branch
+        if not validate_branch(info["owner"], info["repository"], cmd_args.branch):
+            raise BranchNotFoundError(cmd_args.branch, info["repository"])
+
+        info["branch"] = cmd_args.branch
+    else:
+        # find branch in url
+        if len(path_segments) > 2:
+            if "blob" not in path_segments or "tree" not in path_segments:
+                # NOTE: IN SOME CASES BRANCH NAME MAY LOOK LIKE PATH SUCH AS feat/something
+                # SO TO IDENTIFY RIGHT BRANCH, CONSTRUCT AND VALIDATE BRANCH BY ITERATING
+                # OVER PATH
+                for i in range(1, len(path_segments)):
+                    branch_name = "/".join(path_segments[3:][:i])
+                    if validate_branch(info["owner"], info["repository"], branch_name):
+                        info["branch"] = branch_name
+                        # rest of the path after branch
+                        info["path"] = "/".join(path_segments[3:][i:])
+                        break
+            else:
+                raise ValueError(f"Invalid URL: {cmd_args.url} is not a valid URL.")
+    # print(info)
+    return info
+
+
+def process_request_url(
+    owner: str, repo: str, branch: str | None, path: str | None
+) -> str:
+    if ZIP:
+        zip_prefix = f"https://api.github.com/repos/{owner}/{repo}/zipball"
+        zip_suffix = ""
+        if branch:
+            zip_suffix = f"/{branch}"
+        return zip_prefix + zip_suffix
+
+    repo_url_prefix = f"https://api.github.com/repos/{owner}/{repo}/contents"
+    repo_url_suffix = ""
+
+    if branch and path:
+        repo_url_suffix = f"/{path}?ref={branch}"
+    elif branch:
+        repo_url_suffix = f"?ref={branch}"
+    elif path:
+        repo_url_suffix = f"/{path}"
+
+    return repo_url_prefix + repo_url_suffix
+
+
+async def get_repository_content(repo_info: dict) -> list[dict]:
     # print("Fetching repository contents...\n")
 
-    # f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref='{branch}'",
-    repo_urls = [
-        f"https://api.github.com/repos/{owner}/{name}/contents/{path}?ref={branch}"
-        if branch
-        else f"https://api.github.com/repos/{owner}/{name}/contents/{path}",
-    ]
+    request_url = process_request_url(
+        repo_info["owner"],
+        repo_info["repository"],
+        repo_info["branch"],
+        repo_info["path"],
+    )
+    fetched_urls = [request_url]
 
     response = []
     files = []
@@ -248,11 +300,11 @@ async def get_repository_content(
                 description="Fetching repository content"
             )
             async with httpx.AsyncClient() as client:
-                for i, req in enumerate(repo_urls):
-                    # print(
-                    #     BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end=""
-                    # )
-                    # print(BRIGHT_YELLOW + req + RESET)
+                for i, req in enumerate(fetched_urls):
+                    print(
+                        BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end=""
+                    )
+                    print(BRIGHT_YELLOW + req + RESET)
 
                     res = await client.get(req)
                     res.raise_for_status()
@@ -274,7 +326,7 @@ async def get_repository_content(
                                 res["path"] = "/".join(res["path"].split("/")[:-1])
                                 files.append(res)
                             else:
-                                repo_urls.append(res["url"])
+                                fetched_urls.append(res["url"])
 
                     response.clear()
 
@@ -340,6 +392,46 @@ def select_files(files: list[dict] | None = None) -> list[dict] | None:
     return selected
 
 
+def download_zip(repo_info: dict) -> None:
+    url = process_request_url(
+        repo_info["owner"],
+        repo_info["repository"],
+        repo_info["branch"],
+        repo_info["path"],
+    )
+
+    output = f"{repo_info['repository']}.zip"
+    if repo_info["branch"]:
+        output = f"{repo_info['repository']}-{repo_info['branch']}.zip"
+
+    print(url)
+
+    path = DOWNLOAD_DIR / output
+    try:
+        with download_progress:
+            with httpx.Client(follow_redirects=True) as client:
+                with client.stream("GET", url) as response:
+                    response.raise_for_status()
+
+                    zip_size = int(response.headers.get("Content-Length", 0))
+                    task = download_progress.add_task(
+                        description=f"Downloading {repo_info['repository']}",
+                        total=zip_size,
+                    )
+                    with open(path, "wb") as f:
+                        for chunk in response.iter_bytes(chunk_size=512 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                                download_progress.update(task, advance=len(chunk))
+
+            download_progress.update(task, visible=False)
+            print(f"Downloaded {repo_info['repository']} to {path}.")
+
+    except httpx.HTTPError as e:
+        print(e)
+        sys.exit(1)
+
+
 async def download_single_file(
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
@@ -398,30 +490,10 @@ async def download_files(files: list[dict]) -> list[Path]:
     return file_paths
 
 
-def timing(start, fetch, download, finish):
-    fetch_time = fetch - start
-    select_time = download - fetch
-    download_time = finish - download
-    total_time = finish - start
-
-    print(
-        f"\nFetched files in: {BRIGHT_RED}{fetch_time:.2f}{RESET} seconds. {(fetch_time / total_time) * 100:.2f}% of total time.",
-    )
-    print(
-        f"Selected files in: {BRIGHT_RED}{select_time:.2f}{RESET} seconds. {(select_time / total_time) * 100:.2f}% of total time.",
-    )
-    print(
-        f"Downloaded files in: {BRIGHT_RED}{download_time:.2f}{RESET} seconds. {(download_time / total_time) * 100:.2f}% of total time.",
-    )
-    print(
-        f"Total execution time: {BRIGHT_RED}{total_time:.2f}{RESET} seconds. {(total_time / total_time) * 100:.2f}% of total time.",
-    )
-
-
 async def main() -> None:
     args = get_arguments()
 
-    global DIR, BRANCH, FLATTEN
+    global DIR, BRANCH, FLATTEN, ZIP, DOWNLOAD_DIR
 
     if args.branch:
         BRANCH = True
@@ -432,14 +504,17 @@ async def main() -> None:
     if args.dir:
         DIR = args.dir
 
+    if args.zip:
+        ZIP = args.zip
+
     try:
         repo = parse_repo_url(args)
 
-        print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
-        print(BRIGHT_YELLOW + repo["repository"] + RESET)
-
         print(f"{BRIGHT_GREEN}[+]{RESET} Owner: ", end="")
         print(BRIGHT_YELLOW + repo["owner"] + RESET)
+
+        print(f"{BRIGHT_GREEN}[+]{RESET} Repository name: ", end="")
+        print(BRIGHT_YELLOW + repo["repository"] + RESET)
 
         if repo["branch"]:
             print(f"{BRIGHT_GREEN}[+]{RESET} Branch: ", end="")
@@ -450,23 +525,23 @@ async def main() -> None:
             print(BRIGHT_YELLOW + repo["path"] + RESET)
         print()
 
-        # # fetch repository content
-        files = await get_repository_content(
-            repo["owner"], repo["repository"], repo["branch"], repo["path"]
-        )
-
-        # select files
-        selected_files = select_files(files)
-
         # download selected files
-        global DOWNLOAD_DIR
         DOWNLOAD_DIR = Path(repo["repository"])
         DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-        file_paths = await download_files(selected_files)
+        if ZIP:
+            download_zip(repo)
+        else:
+            # fetch repository content
+            files = await get_repository_content(repo)
 
-        if args.rate_limit:
-            check_user_rate_limit()
+            # select files
+            selected_files = select_files(files)
+
+            await download_files(selected_files)
+
+            if args.rate_limit:
+                check_user_rate_limit()
 
     except Exception as e:
         print(f"{e}")
