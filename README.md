@@ -2,7 +2,7 @@
 
 - [ ] Convert the program into CLI.
 - [x] Use `click` or `argparse` for better CLI tool management
-- [ ] Add file download progress bar
+- [x] Add file download progress bar
 - [ ] Download path feature
 - [x] Specific branch feature
 - [ ] `fzf` alternative if it not installed
@@ -10,7 +10,7 @@
 - [x] download files in the directory same as repository name instea of `filehub_downloads`
 - [x] handle if the repository URL is not provided.
 - [x] check if the provided url is a Github url
-- [ ] handle if github repo doesn't exits
+- [x] handle if github repo doesn't exits
 - [x] if the file github url is provided, download it directly
 - [x] handle the branch name if it's provided in the URL
 - [ ] handle program cancellation using `CTRL+C`
@@ -28,7 +28,7 @@
 
 - [ ] lazy browsing, instead of making 1000s of calls for each directory, let user the choose the directory and then make the call
 - [x] create a flag to let user check their rate limit maybe `--rate-limit`
-- [ ] select files using fzf
+- [x] select files using fzf
 
 - [ ] download from gist
 - [x] download complete directory
