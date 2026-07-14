@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/filehub.png"/>
+</div>
+
 ## Todos
 
 - [ ] Convert the program into CLI.
@@ -67,3 +71,14 @@ To avoid this, use `--use-auth` option to always use authenticated requests.
 - [selectable interface, maybe](https://github.com/dmartinezm/cli_table_scroll/tree/master)
 
 - [custom argparse help](https://gist.github.com/fonic/fe6cade2e1b9eaf3401cc732f48aeebd)
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/license-mit-c4a7e7?style=for-the-badge&labelColor=%23191724&link=https%3A%2F%2Fgithub.com%2Fabhicodes07%2Ffilehub-cli%2Fblob%2Fmain%2FLICENSE" alt="LICENSE">
+
+</div>
+
+<p align="center">
+	Copyright &copy; 2026-present <a href="https://github.com/abhicodes07" target="_blank">Abhi9av</a>
+</p>
