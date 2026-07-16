@@ -304,6 +304,7 @@ async def get_repository_content(repo_info: dict) -> list[dict]:
     files = []
 
     try:
+        fetch_start_time = time.perf_counter()
         with fetch_progress:
             fetch_task = fetch_progress.add_task(
                 description="Fetching repository content"
@@ -314,7 +315,7 @@ async def get_repository_content(repo_info: dict) -> list[dict]:
                     #     BRIGHT_GREEN + f"[{i + 1}]" + RESET + " Fetched URL: ", end=""
                     # )
                     # print(BRIGHT_YELLOW + req + RESET)
-                    fetch_progress.console.log(f"Fetched URL: [bold yellow]{req}")
+                    # fetch_progress.console.log(f"Fetched URL: [bold yellow]{req}")
 
                     res = await client.get(req)
                     res.raise_for_status()
@@ -342,7 +343,10 @@ async def get_repository_content(repo_info: dict) -> list[dict]:
 
             fetch_progress.update(fetch_task, visible=False)
 
-        print(f"\nFetched {BRIGHT_GREEN}{len(files)}{RESET} files.")
+        fetch_finish_time = time.perf_counter()
+        print(
+            f"Fetched {BRIGHT_GREEN}{len(files)}{RESET} files in {fetch_finish_time - fetch_start_time:.2f}s."
+        )
     except httpx.HTTPError as exc:
         handle_client_error(exc)
         sys.exit(1)
