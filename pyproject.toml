@@ -5,8 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "aiofiles>=25.1.0",
-    "click>=8.4.2",
-    "httpx>=0.28.1",
-    "rich>=15.0.0",
+  "aiofiles>=25.1.0",
+  "click>=8.4.2",
+  "httpx>=0.28.1",
+  "rich>=15.0.0",
 ]
+
+[project.scripts]
+filehub = "filehub.cli:main"
+
+[build-system]
+requires = ["flit_core<4"]
+build-backend = "flit_core.buildapi"
