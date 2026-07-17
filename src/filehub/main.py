@@ -1,8 +1,8 @@
 import argparse
 import asyncio
 import subprocess
-import time
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from subprocess import CalledProcessError
@@ -12,35 +12,27 @@ import aiofiles
 import httpx
 from rich.progress import (
     BarColumn,
+    DownloadColumn,
     Progress,
     SpinnerColumn,
     TaskID,
     TextColumn,
     TimeElapsedColumn,
-    DownloadColumn,
-    TransferSpeedColumn,
     TimeRemainingColumn,
+    TransferSpeedColumn,
 )
 
-# terminal colors
-RESET = "\033[0m"  # called to return to standard terminal text color
-BRIGHT_RED = "\033[91m"
-BRIGHT_GREEN = "\033[92m"
-BRIGHT_YELLOW = "\033[93m"
-WHITE = "\033[97m"
-
-# download dir
-DOWNLOAD_DIR = Path("Filehub")
-
-# limit download to only 4 cpus
-DOWNLOAD_LIMIT = 4
-
-# flags
-BRANCH = False
-FLATTEN = False
-DIR = False
-ZIP = False
-
+from .constants import (
+    BRANCH,
+    BRIGHT_GREEN,
+    BRIGHT_RED,
+    BRIGHT_YELLOW,
+    DIR,
+    DOWNLOAD_DIR,
+    DOWNLOAD_LIMIT,
+    RESET,
+)
+from .errors import BranchNotFoundError
 
 fetch_progress = Progress(
     TimeElapsedColumn(),
@@ -59,19 +51,6 @@ download_progress = Progress(
     "•",
     TimeRemainingColumn(),
 )
-
-
-class BranchNotFoundError(Exception):
-    """Raised when the user specified branch does not exist."""
-
-    def __init__(self, branch: str, repository: str) -> None:
-        self.branch = branch
-        self.repository = repository
-        message = (
-            f"'{self.branch}' Branch does not exist on '{self.repository}' repository."
-        )
-
-        super().__init__(message)
 
 
 def get_arguments() -> argparse.Namespace:
