@@ -57,7 +57,7 @@ wheels = [
 [[package]]
 name = "filehub"
 version = "0.1.1"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "click" },
