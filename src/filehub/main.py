@@ -21,18 +21,26 @@ from rich.progress import (
     TimeRemainingColumn,
     TransferSpeedColumn,
 )
+from filehub.errors import BranchNotFoundError
 
-from .constants import (
-    BRANCH,
-    BRIGHT_GREEN,
-    BRIGHT_RED,
-    BRIGHT_YELLOW,
-    DIR,
-    DOWNLOAD_DIR,
-    DOWNLOAD_LIMIT,
-    RESET,
-)
-from .errors import BranchNotFoundError
+# terminal colors
+RESET = "\033[0m"  # called to return to standard terminal text color
+BRIGHT_RED = "\033[91m"
+BRIGHT_GREEN = "\033[92m"
+BRIGHT_YELLOW = "\033[93m"
+WHITE = "\033[97m"
+
+# download dir
+DOWNLOAD_DIR = Path("Filehub")
+
+# limit download to only 4 cpus
+DOWNLOAD_LIMIT = 4
+
+# flags
+BRANCH = False
+FLATTEN = False
+DIR = False
+ZIP = False
 
 fetch_progress = Progress(
     TimeElapsedColumn(),
@@ -123,6 +131,7 @@ def timing(start, fetch, download, finish):
 
 
 def validate_url(url: str):
+    """Verify if the provided url is Github url or not."""
     segments = urlsplit(url)
 
     if segments.netloc not in ("github.com", "gist.github.com"):
@@ -190,6 +199,7 @@ def handle_client_error(error: httpx.HTTPError) -> None:
 def parse_repo_url(cmd_args: argparse.Namespace) -> dict:
     info = {}
 
+    # verify github url
     validate_url(cmd_args.url)
 
     url = urlsplit(cmd_args.url)
@@ -228,7 +238,7 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict:
     else:
         # find branch in url
         if len(path_segments) > 2:
-            if "blob" not in path_segments or "tree" not in path_segments:
+            if ("blob" not in path_segments) ^ ("tree" not in path_segments):
                 # NOTE: IN SOME CASES BRANCH NAME MAY LOOK LIKE PATH SUCH AS feat/something
                 # SO TO IDENTIFY RIGHT BRANCH, CONSTRUCT AND VALIDATE BRANCH BY ITERATING
                 # OVER PATH
