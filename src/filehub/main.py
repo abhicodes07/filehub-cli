@@ -170,7 +170,7 @@ def check_user_rate_limit() -> None:
 def handle_client_error(error: httpx.HTTPError) -> None:
     if isinstance(error, httpx.ConnectError):
         print(
-            "\nFailed to establish connection, try:\n- Checking yout network connection."
+            "\nFailed to establish connection, try:\n- Checking your network connection."
         )
 
     if isinstance(error, httpx.HTTPStatusError):
@@ -190,7 +190,7 @@ def handle_client_error(error: httpx.HTTPError) -> None:
         else:
             error_msg = f"\n{str(error)}"
             if status_code == 404:
-                error_msg += ", please check the input URL!"
+                error_msg += "or try checking the provided URL!"
             print(error_msg)
     else:
         print(f"\nError: {str(error)}")
@@ -203,7 +203,8 @@ def parse_repo_url(cmd_args: argparse.Namespace) -> dict:
     validate_url(cmd_args.url)
 
     url = urlsplit(cmd_args.url)
-    path_segments = url.path.strip("/").split("/")
+    path = url.path.strip("/").split("/")
+    path_segments = [item for item in path if item.strip()]
 
     if len(path_segments) < 2:
         match url.netloc:
