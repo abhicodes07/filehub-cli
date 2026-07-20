@@ -410,7 +410,7 @@ def download_zip(repo_info: dict) -> None:
     if repo_info["branch"]:
         output = f"{repo_info['repository']}-{repo_info['branch']}.zip"
 
-    print(url)
+    # print(url)
 
     path = DOWNLOAD_DIR / output
     try:
@@ -422,6 +422,7 @@ def download_zip(repo_info: dict) -> None:
                     zip_size = int(response.headers.get("Content-Length", 0))
                     task = download_progress.add_task(
                         description=f"Downloading {repo_info['repository']}",
+                        filename=output,
                         total=zip_size,
                     )
                     with open(path, "wb") as f:
