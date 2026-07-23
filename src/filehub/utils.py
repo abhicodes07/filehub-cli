@@ -115,10 +115,8 @@ def parse_repo_url(repo_url: str, branch: str | None = None) -> dict[str, Any]:
     info["path"] = None
 
     if len(path_segments) > 2:
-        print("a")
         # find branch in url
         if ("blob" not in path_segments) ^ ("tree" not in path_segments):
-            print("b")
             # NOTE: IN SOME CASES BRANCH NAME MAY LOOK LIKE PATH SUCH AS feat/something
             # SO TO IDENTIFY RIGHT BRANCH, CONSTRUCT AND VALIDATE BRANCH BY ITERATING
             # OVER PATH
@@ -134,7 +132,6 @@ def parse_repo_url(repo_url: str, branch: str | None = None) -> dict[str, Any]:
 
     # replace the found branch with explicitly provided branch after path is sorted
     if branch:
-        print("invoked")
         if not validate_branch(info["owner"], info["repository"], branch):
             raise BranchNotFoundError(branch, info["repository"])
         info["branch"] = branch
