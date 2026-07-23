@@ -121,7 +121,3 @@ async def initialize_download(
 
     if rate_limit:
         check_user_rate_limit()
-
-
-if __name__ == "__main__":
-    main()
