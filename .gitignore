@@ -9,9 +9,3 @@ tests/
 
 # Virtual environments
 .venv
-
-test.py
-progress.py
-progress2.py
-arg.py 
-fetcher.py
